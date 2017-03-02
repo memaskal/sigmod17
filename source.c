@@ -9,7 +9,7 @@
 //#define NDEBUG
 
 #ifndef NDEBUG
-#define debug_print(...)  do{ fprintf(stdout, __VA_ARGS__); }while(0)
+#define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
 #else
 #define debug_print(...)  do{ }while(0);
 #endif
@@ -25,13 +25,32 @@
 typedef struct NODE {
 	struct NODE** children;
 	int word_ending; // NOTE: type for bool values
+	int depth;
 } NODE;
+
+// per search additional for nodes
+// override_word_ending
+// has_search_started
+//
+
+typedef struct FIFO_NODE { 
+	int array_start; //offset in the question string, where this search starts
+
+	struct FIFO_NODE* next;
+} FIFO_NODE;
+
+
+
+void fifo_insert(FIFO_NODE* rootstart, FIFO_NODE* rootend, int start) {
+//	FIFO_NODE 
+}
+
 
 // Static for now. NOTE: need to test big sized arrays for static vs dynamic
 NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = {};
 int next_empty_array = 0;
 
-NODE* get_new_node(){
+NODE* get_new_node() {
 	assert(next_empty_array < MAX_NODES);
 
 	NODE* node = (NODE *)malloc(sizeof(NODE));
@@ -59,6 +78,7 @@ void add_word(NODE* root, const char* word, int length) {
 		}
 		else {
 			current_node->children[word[i]] = get_new_node();
+			current_node->children[word[i]]->depth = current_node->depth + 1;
 			current_node = current_node->children[word[i]];
 		}
 	}
@@ -96,7 +116,6 @@ int remove_word(NODE* root, const char* word, int length) {
 	int i;
 	NODE* current_node = root;
 
-
 	assert(current_node);
 	assert(word);
 	assert(length <= MAX_WORD_LEN);
@@ -114,6 +133,8 @@ int remove_word(NODE* root, const char* word, int length) {
 
 int main(){
 	NODE *trie = get_new_node();
+	trie->depth = 0;
+
 
 	char* test = "test";
 	char* test2 = "test 123";
@@ -122,7 +143,7 @@ int main(){
 	char* search1 = "test";
 	char* search2 = "test 123";
 
-	debug_print("=== SIGMOD 2017 SUBMITION ===\n");
+	debug_print("=== HAXOR 2017 SUBMITION ===\n");
 
 	add_word(trie, test, strlen(test));
 	add_word(trie, test2, strlen(test2));
