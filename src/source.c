@@ -14,6 +14,8 @@
 #define debug_print(...)  do{ }while(0);
 #endif
 
+#pragma GCC diagnostic ignored "-Wchar-subscripts" // using assert for that
+
 
 #define MAX_NODES 10000
 #define MAX_WORD_LEN 400
@@ -61,7 +63,7 @@ NODE* get_new_node() {
 	return node;
 }
 
-void add_word(NODE* root, const char* word, int length) {
+void add_word(NODE* root, char* word, int length) {
 	int i;
 	NODE* current_node = root;
 
@@ -87,7 +89,7 @@ void add_word(NODE* root, const char* word, int length) {
 	debug_print("Total Nodes in trie: %d after adding: %s\n", next_empty_array, word);
 }
 
-int item_exists(NODE* root, const char* search, int length, int start_point) {
+int item_exists(NODE* root, char* search, int length, int start_point) {
 	int i;
 	NODE* current_node = root;
 
@@ -112,7 +114,7 @@ int item_exists(NODE* root, const char* search, int length, int start_point) {
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
-int remove_word(NODE* root, const char* word, int length) {
+int remove_word(NODE* root, char* word, int length) {
 	int i;
 	NODE* current_node = root;
 
@@ -129,6 +131,7 @@ int remove_word(NODE* root, const char* word, int length) {
 	}
 	assert(current_node);
 	current_node->word_ending = 0;
+	return 1;
 }
 
 int main(){
