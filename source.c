@@ -6,7 +6,6 @@
 #include <assert.h>
 
 // Debugging defines
-
 //#define NDEBUG
 
 #ifndef NDEBUG
@@ -16,7 +15,6 @@
 #endif
 
 
-
 #define MAX_NODES 10000
 #define MAX_WORD_LEN 400
 #define MAX_SEARCH_LEN 1000
@@ -24,27 +22,13 @@
 #define NODE_ARRAY_SIZE 100
 #define NODE_ARRAY_OFFSET ' ' //character 0 for in node array
 
-
 typedef struct NODE {
-	int* children;
+	struct NODE** children;
 	int word_ending; // NOTE: type for bool values
 } NODE;
 
-typedef struct LIST_NODE { // one listnode for each search to avoid overlap.
-	NODE* place;
-	char sequence[1000]; 	// Saves followed char list for printing.
-				// TODO: Just for testing list implementation.
-				// need to apply a better(?) allocation method
-	LIST_NODE* next;
-	LIST_NODE* prev;
-
-} LIST_NODE;
-// in this list we can only add at the end, but we need to be able to remove from everywhere
-
-void add_search(LIST_NODE* root, )
-
 // Static for now. NOTE: need to test big sized arrays for static vs dynamic
-int node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = {};
+NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = {};
 int next_empty_array = 0;
 
 NODE* get_new_node(){
@@ -104,22 +88,6 @@ int item_exists(NODE* root, const char* search, int length, int start_point) {
 		return 1;
 	}
 	return 0;
-}
-
-int search_from_space(NODE* root, const char *string, int length) {
-	int i;
-	NODE* current_node = root;
-	debug_print("Starting new search in: \n=========\n%s\n==========\n", string);
-
-	assert(current_node);
-
-
-	for (i=0; i<length; ++i) {
-		if (string[i] == ' ') {
-			search_from_space(root, *string[i], length - i);
-		}
-	}
-
 }
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
