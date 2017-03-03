@@ -28,20 +28,25 @@ typedef struct NODE {
 	struct NODE** children;
 	int word_ending; // NOTE: type for bool values
 	int depth;
-	int id;
+	int id; // offset in the node arrays
 } NODE;
 
 // per search additional for nodes
 // override_word_ending
-// has_search_started
-//
 
-typedef struct FIFO_NODE { 
+
+// FIFO was implemented and used in previous versions.
+// Although we don't use it at the moment we may need it later.
+
+
+/* FIFO CODE
+typedef struct FIFO_NODE {
 	int array_start; //offset in the question string, where this search starts
 
 	struct FIFO_NODE* next;
 } FIFO_NODE;
 
+*
 typedef struct FIFO {
 	FIFO_NODE first;
 	FIFO_NODE* last;
@@ -79,6 +84,7 @@ int fifo_remove(FIFO* queue) {
 	queue->first.next = removed->next;
 	return removed->array_start;
 }
+*/
 
 
 // Static for now. NOTE: need to test big sized arrays for static vs dynamic
@@ -107,21 +113,19 @@ void add_word(NODE* root, char* word) {
 	for (i=0; word[i] != '\0'; ++i) {
 		assert(word[i] >= NODE_ARRAY_OFFSET && word[i] < NODE_ARRAY_OFFSET + NODE_ARRAY_SIZE);
 
-		if (current_node->children[word[i]]) {
-			// node exists, continue
-			current_node = current_node->children[word[i]];
-		}
-		else {
+		if (!current_node->children[word[i]]) {
 			current_node->children[word[i]] = get_new_node();
 			current_node->children[word[i]]->depth = current_node->depth + 1;
-			current_node = current_node->children[word[i]];
 		}
+
+		current_node = current_node->children[word[i]];
 	}
 	assert(current_node);
 	current_node->word_ending = 1;
 	debug_print("Total Nodes in trie: %d after adding: %s\n", next_empty_array, word);
 }
 
+// NOTE: Unused function. Was here for testing purposes
 int item_exists(NODE* root, char* search, int length, int start_point) {
 	int i;
 	NODE* current_node = root;
@@ -165,10 +169,13 @@ int remove_word(NODE* root, char* word) {
 	current_node->word_ending = 0;
 	return 1;
 }
-int jobs_taken[1000] = {};
-int iterator_counter = 0;
 
-int search_from(NODE* root, char* search, int start, FIFO* jobs) {
+int jobs_array[1000];
+int iterator_counter = 0;
+int jobs_array_ptr = 0;
+
+
+int search_from(NODE* root, char* search, int start) {
 	int i;
 	NODE* current_node = root;
 	assert(current_node);
@@ -178,6 +185,7 @@ int search_from(NODE* root, char* search, int start, FIFO* jobs) {
 		iterator_counter++;
 		assert(current_node);
 		if (current_node->word_ending == 1 && search_state[current_node->id] == 0 && (search[i] == ' ' || search[i] == '\0')) {
+			// result found
 			int j;
 			for (j=start; j < current_node->depth+start; ++j) {
 				printf("%c", search[j]);
@@ -186,6 +194,7 @@ int search_from(NODE* root, char* search, int start, FIFO* jobs) {
 			search_state[current_node->id] = 1;
 		}
 		if (current_node->children[search[i]] == NULL) {
+			// no path matches, stop searching.
 			break;
 		}
 		current_node = current_node->children[search[i]];
@@ -193,30 +202,34 @@ int search_from(NODE* root, char* search, int start, FIFO* jobs) {
 	return 0;
 }
 
-int queue_implementation(NODE* root, char* search) {
-	FIFO* jobs = get_new_fifo();
+int search_implementation(NODE* root, char* search) {
 	int i;
+
+	// init search
 	iterator_counter = 0;
+	jobs_array_ptr = 0;
+
 	// NOTE: find optimised way to do this
 	for (i=0; i< next_empty_array; ++i) {
 		search_state[i] = 0;
 	}
-	for (i=0; i<strlen(search); ++i) {
+	// end of init search
+
+
+	// NOTE: this needs to be done on input if we use getchar()
+	// make a job for each space character
+	for (i=0; search[i]!='\0'; ++i) {
 		if (search[i] == ' ') {
-//			jobs_taken[i] = 1;
 			debug_print("Adding job: %d\n", i+1);
-			fifo_insert(jobs, i+1);
+			jobs_array[jobs_array_ptr++] = i+1;
 		}
 	}
 
-
-	int p = 0;
-	while (p > -1) {
-		debug_print("P is: %d\n", p);
-		// start search from p and add to queue if we need
-		search_from(root, search, p, jobs);
-		p = fifo_remove(jobs);
+	// execute all jobs
+	for (i=0; i<jobs_array_ptr; ++i) {
+		search_from(root, search, jobs_array[i]);
 	}
+
 	printf(" < in %d iterations!\n", iterator_counter);
 	return 0;
 }
@@ -225,7 +238,7 @@ int main(){
 
 	NODE *trie = get_new_node();
 	trie->depth = 0;
-/*
+
 	add_word(trie, "AC AB");
 	add_word(trie, "AC ABAB");
 	add_word(trie, "ABAB");
@@ -233,10 +246,10 @@ int main(){
 	add_word(trie, "AB AB ABAB");
 	add_word(trie, "AB AB");
 	add_word(trie, "AB");
-	queue_implementation(trie, "AC ABAB AB AB CA AB AB ABAB");
-	queue_implementation(trie, "AC ABAB AB AB CA AB AB ABAB");
-*/
+	search_implementation(trie, "AC ABAB AB AB CA AB AB ABAB");
+	search_implementation(trie, "AC ABAB AB AB CA AB AB ABAB");
 
+/*
 	char input[1000] = "";
 	while (1){
 		fgets(input, 100, stdin);
@@ -253,8 +266,8 @@ int main(){
 	fgets(input, 1000, stdin);
 	input[strlen(input)-1] = '\0';
 
-	queue_implementation(trie, input);
-	queue_implementation(trie, input);
-
+	search_implementation(trie, input);
+	search_implementation(trie, input); // double check that all variables init correctly
+*/
 	return 0;
 }
