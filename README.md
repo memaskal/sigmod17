@@ -17,3 +17,9 @@ To build with OpenMP use: make omp
 * ./test.sh -v
 
 Valgrind is slow.
+
+## Makefile modes:
+* make all
+* make dbg (force use openmp, don't use -O3)
+* make omp (force use openmp, use -O3)
+* make noflags (don't use any flags)
