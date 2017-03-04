@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 // NOTE: do we need type control?
 // #include <stdint.h>
 #include <assert.h>
@@ -14,15 +15,17 @@
 #define debug_print(...)  do{ }while(0);
 #endif
 
-#pragma GCC diagnostic ignored "-Wchar-subscripts" // using assert for that
+#pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
+							// TODO: fix all chars to unsigned chars
 
-
-#define MAX_NODES 10000
+#define MAX_NODES 100000
 #define MAX_WORD_LEN 400
-#define MAX_SEARCH_LEN 1000
+//#define MAX_SEARCH_LEN 10000
 
-#define NODE_ARRAY_SIZE 100
+#define NODE_ARRAY_SIZE 200
 #define NODE_ARRAY_OFFSET ' ' //character 0 for in node array
+
+#define JOBS_SIZE 10000
 
 typedef struct NODE {
 	struct NODE** children;
@@ -31,122 +34,67 @@ typedef struct NODE {
 	int id; // offset in the node arrays
 } NODE;
 
-// per search additional for nodes
-// override_word_ending
-
-
-// FIFO was implemented and used in previous versions.
-// Although we don't use it at the moment we may need it later.
-
-
-/* FIFO CODE
-typedef struct FIFO_NODE {
-	int array_start; //offset in the question string, where this search starts
-
-	struct FIFO_NODE* next;
-} FIFO_NODE;
-
-*
-typedef struct FIFO {
-	FIFO_NODE first;
-	FIFO_NODE* last;
-} FIFO;
-
-FIFO* get_new_fifo() {
-	FIFO* fifo;
-	fifo = (FIFO*)malloc(sizeof(FIFO));
-	fifo->first.array_start = -2;
-	fifo->first.next = NULL;
-	fifo->last = &fifo->first;
-	return fifo;
-}
-
-void fifo_insert(FIFO* queue, int start) {
-	FIFO_NODE* added = (FIFO_NODE*) malloc(sizeof(FIFO_NODE));
-
-	queue->last->next = added;
-	added->next = NULL;
-	added->array_start = start;
-	queue->last = added;
-}
-
-int fifo_remove(FIFO* queue) {
-	FIFO_NODE* removed;
-
-	if (!queue->first.next) {
-		debug_print("FIFO is empty.\n");
-		return -1;
-	}
-	if (queue->first.next == queue->last) {
-		queue->last = &queue->first;
-	}
-	removed = queue->first.next;
-	queue->first.next = removed->next;
-	return removed->array_start;
-}
-*/
-
-
 // Static for now. NOTE: need to test big sized arrays for static vs dynamic
 NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = {};
 int next_empty_array = 0;
 int search_state[MAX_NODES];
 
+int nodes_freed = 0;
+int results_found = 0;
+
+int jobs_array[JOBS_SIZE];
+int iterator_counter = 0;
+int jobs_array_ptr = 0;
+
 NODE* get_new_node() {
 	assert(next_empty_array < MAX_NODES);
 
 	NODE* node = (NODE *)malloc(sizeof(NODE));
-
+	
 	node->word_ending = 0;
+	//node->id = next_empty_array++;
 	node->id = next_empty_array;
+	
 	node->children = node_arrays[next_empty_array++];
+	// NOTE: used calloc for test to run commented assert
+	// calloc is fast :P calloc is good
+	//node->children = (NODE **)calloc(NODE_ARRAY_SIZE, sizeof(NODE*));
 	return node;
 }
 
-void add_word(NODE* root, char* word) {
+void free_node(NODE* root) {
 	int i;
-	NODE* current_node = root;
+	for (i=0; i<NODE_ARRAY_SIZE; ++i) {
+		if (root->children[i]) {
+			free_node(root->children[i]);
+		}
+	}
+	free(root);
+	nodes_freed++;
+}
 
+void add_word(NODE* root, char* word_input) {
+	
+	NODE* current_node = root;
+	char *word = word_input;
+	
 	assert(root);
 	assert(word);
 
-	for (i=0; word[i] != '\0'; ++i) {
-		assert(word[i] >= NODE_ARRAY_OFFSET && word[i] < NODE_ARRAY_OFFSET + NODE_ARRAY_SIZE);
+	while (*word != '\0') {
+		assert(*word >= NODE_ARRAY_OFFSET);
 
-		if (!current_node->children[word[i]]) {
-			current_node->children[word[i]] = get_new_node();
-			current_node->children[word[i]]->depth = current_node->depth + 1;
+		if (!current_node->children[*word]) {
+			current_node->children[*word] = get_new_node();
+			current_node->children[*word]->depth = current_node->depth + 1;
 		}
 
-		current_node = current_node->children[word[i]];
+		current_node = current_node->children[*word];
+		++word;
 	}
 	assert(current_node);
 	current_node->word_ending = 1;
-	debug_print("Total Nodes in trie: %d after adding: %s\n", next_empty_array, word);
-}
-
-// NOTE: Unused function. Was here for testing purposes
-int item_exists(NODE* root, char* search, int length, int start_point) {
-	int i;
-	NODE* current_node = root;
-
-	assert(current_node);
-	assert(search);
-	assert(length <= MAX_WORD_LEN);
-
-	for (i=start_point; i<length; ++i) {
-		assert(current_node);
-		assert(search[i] >= NODE_ARRAY_OFFSET && search[i] <= NODE_ARRAY_OFFSET + NODE_ARRAY_SIZE);
-		if (current_node->children[search[i]] == NULL) {
-			return 0;
-		}
-		current_node = current_node->children[search[i]];
-	}
-	assert(current_node);
-	if (current_node->word_ending) {
-		return 1;
-	}
-	return 0;
+	
 }
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
@@ -170,13 +118,8 @@ int remove_word(NODE* root, char* word) {
 	return 1;
 }
 
-int jobs_array[1000];
-int iterator_counter = 0;
-int jobs_array_ptr = 0;
-
-
 int search_from(NODE* root, char* search, int start) {
-	int i;
+	unsigned int i;
 	NODE* current_node = root;
 	assert(current_node);
 	// TODO:
@@ -185,15 +128,22 @@ int search_from(NODE* root, char* search, int start) {
 		iterator_counter++;
 		assert(current_node);
 		if (current_node->word_ending == 1 && search_state[current_node->id] == 0 && (search[i] == ' ' || search[i] == '\0')) {
-			// result found
-			int j;
-			for (j=start; j < current_node->depth+start; ++j) {
-				printf("%c", search[j]);
+			#pragma omp critical
+			{
+				int j;
+				for (j=start; j < current_node->depth+start; ++j) {
+					printf("%c", search[j]);
+					debug_print("%c", search[j]);
+					results_found++;
+				}
+				printf("|");
+				debug_print("|");
+			
+				search_state[current_node->id]++;
 			}
-			printf("|");
-			search_state[current_node->id] = 1;
 		}
-		if (current_node->children[search[i]] == NULL) {
+
+		if (current_node->children[(unsigned char)search[i]] == NULL) {
 			// no path matches, stop searching.
 			break;
 		}
@@ -215,59 +165,91 @@ int search_implementation(NODE* root, char* search) {
 	}
 	// end of init search
 
-
 	// NOTE: this needs to be done on input if we use getchar()
 	// make a job for each space character
 	for (i=0; search[i]!='\0'; ++i) {
 		if (search[i] == ' ') {
-			debug_print("Adding job: %d\n", i+1);
 			jobs_array[jobs_array_ptr++] = i+1;
 		}
 	}
+	debug_print("Jobs added: %d\n", i);
 
 	// execute all jobs
 	for (i=0; i<jobs_array_ptr; ++i) {
-		search_from(root, search, jobs_array[i]);
+		#pragma omp task 
+		{	
+			search_from(root, search, jobs_array[i]);
+		}
 	}
-
-	printf(" < in %d iterations!\n", iterator_counter);
+	#pragma omp taskwait
+	debug_print(" < in %d iterations!\n", iterator_counter);
 	return 0;
 }
+
 
 int main(){
 
 	NODE *trie = get_new_node();
 	trie->depth = 0;
+	
+	//maybe larger for fiewer reallocations
+	size_t len = 1024;
+	char *line = (char*)malloc(len * sizeof(char));
+	assert(line);
+	
+	size_t input_len;
+	size_t words_added = 0;
 
-	add_word(trie, "AC AB");
-	add_word(trie, "AC ABAB");
-	add_word(trie, "ABAB");
-	add_word(trie, "AB CA AB");
-	add_word(trie, "AB AB ABAB");
-	add_word(trie, "AB AB");
-	add_word(trie, "AB");
-	search_implementation(trie, "AC ABAB AB AB CA AB AB ABAB");
-	search_implementation(trie, "AC ABAB AB AB CA AB AB ABAB");
+	// while there is input read it
+	while ((input_len = getline(&line, &len, stdin)) > 2 || 
+		  (line[0] != 'S')) {
 
-/*
-	char input[1000] = "";
-	while (1){
-		fgets(input, 100, stdin);
-
-		input[strlen(input)-1] = '\0'; // TODO: unsafe. Use fgetc...
-		if (input[0] == 'S') {
-			break;
-		}
-
-		add_word(trie, input);
+		// add the \0 char replacing \n 
+		line[input_len - 1] = '\0';
+		add_word(trie, line);
+		words_added++;
 	}
+	debug_print("Words added: %zu. Total nodes in trie: %d\n", words_added, next_empty_array);
 
-	printf("Give Q string: \n");
-	fgets(input, 1000, stdin);
-	input[strlen(input)-1] = '\0';
+	// lets start our parallel code number of threads are set to maximum
+	// by default -> i think :P
+	#pragma omp parallel
+	{
+		#pragma omp master
+		{
+			// this one is run only by master thread (id = 0)
+			// input finished we are ready to read the queries
+			char action;
+					
+			// totaly ready to start
+			printf("R\n");
+			// TODO: find faster way to force fflush
+			fflush(stdout);
+	
+			action = getchar_unlocked();
+			// read junk space
+			getchar_unlocked();
+	
+			// TDDO: implement fast input
+			// Read the rest of input
+			input_len = getline(&line, &len, stdin);
+			line[input_len-1] = '\0';
+			debug_print("Selected action was: %c and input size was: %zu\n", action, input_len);
+			switch (action) {
+				case 'Q':
+					search_implementation(trie, line);
+					break;	
+				case 'A':
+					debug_print("A\n");
+			}		
+			#pragma omp taskwait
+		}	
+	}
+	debug_print("\nTotal results found during runtime: %d\n", results_found);
+	free_node(trie);
+	debug_print("Nodes freed: %d\n", nodes_freed);
+	free(line);
 
-	search_implementation(trie, input);
-	search_implementation(trie, input); // double check that all variables init correctly
-*/
 	return 0;
 }
+
