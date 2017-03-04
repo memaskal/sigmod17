@@ -12,8 +12,8 @@
 #include <fstream>
 #include <sstream>
 
-const unsigned BATCH_SIZE = 1000;
-const unsigned long MAX_FAILED_QUERIES = 100;
+const unsigned BATCH_SIZE = 10000;
+const unsigned long MAX_FAILED_QUERIES = 10000;
 
 // Print the usage instructions for the harness
 void usage()
@@ -325,11 +325,10 @@ int main(int argc, char *argv[])
 
 		// Parse and compare the batch result
 		std::stringstream result(output);
-                
+
 		for (unsigned i = 0; i != result_batches[batch].size() && failure_cnt < MAX_FAILED_QUERIES; ++i)
 		{
 			std::string val;
-                        
 			//result >> val;
                         std::getline(result,val);
 			if (!result)
@@ -341,7 +340,11 @@ int main(int argc, char *argv[])
 			bool matched = val == result_batches[batch][i];
 			if (!matched)
 			{
-				std::cerr << "Result mismatch for query " << query_no << ", expected: " << result_batches[batch][i] << ", actual: " << val << std::endl;
+				std::cerr << "Result mismatch for query " << query_no << ", expected:" << "\x1b[32m" << std::endl
+				<< result_batches[batch][i] << std::endl
+				<< "===============================================================\x1b[31m" <<  std::endl
+				<< val << std::endl
+				<< "===============================================================\x1b[0m" <<  std::endl;
 				++failure_cnt;
 			}
                         /*if (matched)
@@ -360,8 +363,8 @@ int main(int argc, char *argv[])
 		// Output the elapsed time in milliseconds
 		double elapsed_sec = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
 		std::cout << (long) (elapsed_sec * 1000) << std::endl;
+		std::cerr << "\x1b[32mHARNESS: Elapsed time for the correct result: " << (long) (elapsed_sec * 1000) << "\x1b[0m" << std::endl;
 		return EXIT_SUCCESS;
 	}
-
 	return EXIT_FAILURE;
 }
