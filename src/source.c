@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
 // NOTE: do we need type control?
 // #include <stdint.h>
 #include <assert.h>
@@ -13,87 +14,95 @@
 #define NDEBUG
 
 #ifndef NDEBUG
+#include <string.h>
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
 #else
 #define debug_print(...)  do{ }while(0);
-#endif
+	#ifdef _MSC_VER /* VS PORTABILITY. */
+	#define getline vs_getline
+
+	int vs_getline(char** line, size_t* len, FILE* f) {
+		fgets(*line, *len, f);
+		return strlen(*line);
+	}
+
+
+	#endif // _MSC_VER
+#endif // NDEBUG
+
 
 #pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
-							// TODO: fix all chars to unsigned chars
+// TODO: fix all chars to unsigned chars
+
 
 #define MAX_NODES 100000
-#define MAX_WORD_LEN 10000
-//#define MAX_SEARCH_LEN 10000
-
-#define NODE_ARRAY_SIZE 250
-#define NODE_ARRAY_OFFSET ' ' //character 0 for in node array
-
-#define JOBS_SIZE 50000
-
-//#define INPUT_REALLOC_SIZE 64  // used in fast read
+#define NODE_ARRAY_SIZE 256
+#define NODE_ARRAY_OFFSET ' '	 //character 0 for in node array
 
 typedef struct NODE {
 	struct NODE** children;
-	int word_ending; // NOTE: type for bool values
+	int word_ending;			// NOTE: type for bool values
 	int depth;
-	int id; // offset in the node arrays
+	unsigned int id;			// offset in the node arrays
 } NODE;
 
+
+typedef struct N_GRAM {
+	int start;
+	int end;
+} N_GRAM;
+
+
 // Static for now. NOTE: need to test big sized arrays for static vs dynamic
-NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = {};
-int next_empty_array = 0;
-int search_state[MAX_NODES];
+NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = { };
+N_GRAM search_state[MAX_NODES];
 
+int results_list[MAX_NODES]; // max nodes
+int results_found = 0; // free spot 
+
+int next_empty_array = 0; //used by get_new_node
+
+// only for debuging
 int nodes_freed = 0;
-int results_found = 0;
-
-int jobs_array[JOBS_SIZE];
 int iterator_counter = 0;
-int jobs_array_ptr = 0;
+
 
 NODE* get_new_node() {
 	assert(next_empty_array < MAX_NODES);
 
 	NODE* node = (NODE *)malloc(sizeof(NODE));
-	
+
 	node->word_ending = 0;
-	//node->id = next_empty_array++;
 	node->id = next_empty_array;
-	
+
+	// TODO: next empty array Increment should be an atomic
 	node->children = node_arrays[next_empty_array++];
-	// NOTE: used calloc for test to run commented assert
-	// calloc is fast :P calloc is good
+	// TODO : benchmark with calloc
 	//node->children = (NODE **)calloc(NODE_ARRAY_SIZE, sizeof(NODE*));
 	return node;
 }
 
+
 void free_node(NODE* root) {
+	assert(root);
 	int i;
-	for (i=0; i<NODE_ARRAY_SIZE; ++i) {
+	for (i = 0; i < NODE_ARRAY_SIZE; ++i) {
 		if (root->children[i]) {
 			free_node(root->children[i]);
 		}
 	}
 	free(root);
-	nodes_freed++;
+	++nodes_freed;
 }
+
 
 void add_word(NODE* root, char* word_input) {
 	
 	NODE* current_node = root;
 	char *word = word_input;
-	
+
 	assert(root);
 	assert(word);
-	if (	word[0] == 't' &&
-		word[1] == 'h' &&
-		word[2] == 'e' &&
-		word[3] == 'r' &&
-		word[4] == 'e' 
-		) {
-		debug_print("ADDING WORD: '%s'\n", word );
-	}
-
 
 	while (*word != '\0') {
 		assert(*word >= NODE_ARRAY_OFFSET);
@@ -108,170 +117,142 @@ void add_word(NODE* root, char* word_input) {
 	}
 	assert(current_node);
 	current_node->word_ending = 1;
-	
 }
+
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
 int remove_word(NODE* root, char* word) {
-	int i;
+
 	NODE* current_node = root;
 
-	assert(current_node);
+	assert(root);
 	assert(word);
 
-	for (i=0; word[i]!='\0'; ++i) {
-		assert(current_node);
-		if (current_node->children[word[i]] == NULL) {
+	while (*word != '\0' && current_node != NULL) {
+		if (current_node->children[*word] == NULL) {
 			return 0;
 		}
-		current_node = current_node->children[word[i]];
+		current_node = current_node->children[*word];
+		++word;
 	}
-	assert(current_node);
+
 	current_node->word_ending = 0;
 	return 1;
 }
-int result_start[JOBS_SIZE] = {};
-int result_len[JOBS_SIZE];
-unsigned char result_text[100000] = "";
-int result_text_ptr;
-int search_from(NODE* root, char* search, int start, int job) {
-	unsigned int i;
+
+void search_from(NODE* root, char* search, const int start) {
 
 	NODE* current_node = root;
-	assert(current_node);
-	// TODO:
-	// BUG: of by 1 mistake. Node lags 1 letter behind
-	for (i=start; i<strlen(search)+1; ++i) {
-		iterator_counter++;
-		assert(current_node);
-		
-		if (current_node->word_ending == 1 && (search[i] == ' ' || search[i] == '\0')) {
+
+	assert(root);
+	assert(search);
+
+	const char *str_start = search;
+
+	while (*search != '\0' && current_node != NULL) {
+
+		if (current_node->word_ending == 1 && (*search == ' ' || *search == '\0')) {
 			#pragma omp critical
-			if (search_state[current_node->id] == 0) {
-				results_found++;
-				result_start[job] = start;
-				result_len[job] = i-start;
-				unsigned int k;
-				for (k=start; k<i; ++k) {				
-					result_text[result_text_ptr++] = search[k];
+			if (search_state[current_node->id].start == 0 || start < search_state[current_node->id].start) {
+
+				if (search_state[current_node->id].start == 0) {
+					results_list[results_found++] = current_node->id;
 				}
-				result_text[result_text_ptr++] = '|';
-				search_state[current_node->id]++;
+
+				search_state[current_node->id].start = start + 1;
+				search_state[current_node->id].end = search - str_start;
+				// list will be used to find the results and zero the search_state table
 			}
 		}
-
-		if (current_node->children[(unsigned char)search[i]] == NULL) {
-			// no path matches, stop searching.
-			break;
-		}
-		current_node = current_node->children[search[i]];
+		current_node = current_node->children[*(unsigned char *)search];
+		++search;
 	}
-	return 0;
+
+	if (current_node != NULL && *search == '\0' && current_node->word_ending == 1) {
+
+		#pragma omp critical
+		if (search_state[current_node->id].start == 0 || start < search_state[current_node->id].start) {
+			if (search_state[current_node->id].start == 0) {
+				results_list[results_found++] = current_node->id;
+			}
+			search_state[current_node->id].start = start + 1;
+			search_state[current_node->id].end = search - str_start;
+		}
+	}
 }
 
-int search_implementation(NODE* root, char* search) {
+
+int search_implementation(NODE *root, char *search) {
+
+	// This should only be run by master thread
 	int i;
+	
+	// set to zero for the new search
+	results_found = 0;
 
-	// init search
-	iterator_counter = 0;
-	jobs_array_ptr = 0;
-	result_text_ptr = 0;
-	// NOTE: find optimised way to do this
-	for (i=0; i< next_empty_array; ++i) {
-		search_state[i] = 0;
-	}
-	// end of init search
+	i = 0;
+	//while (search[i] == ' ') ++i;
+	#pragma omp task
+	search_from(root, search + i, i);
 
-	// NOTE: this needs to be done on input if we use getchar()
-	// make a job for each space character
-	//i = 0;
-	//while (search[i] == ' ' && search[i] != '\0') ++i;
-	//jobs_array[jobs_array_ptr++] = 0;
-	jobs_array[jobs_array_ptr++] = 0;
-	for (i=0; search[i] != '\0'; ++i) {		
+
+	for (; search[i] != '\0'; ++i) {
 		if (search[i] == ' ') {
-			assert(jobs_array_ptr <= JOBS_SIZE);
-			jobs_array[jobs_array_ptr++] = i+1;
+			#pragma omp task
+			search_from(root, search + i + 1, i + 1);
 		}
 	}
-	debug_print("Jobs added: %d\n", jobs_array_ptr);
-	#ifdef _OPENMP
-	int tid;
-	#endif
-	// execute all jobs
-	#pragma omp parallel shared(search_state) private(i,tid)
-	{
 
-		#pragma omp for schedule(dynamic, 100)
-		for (i=0; i<jobs_array_ptr; ++i) {
-			#ifdef _OPENMP
-			if (i==0) {
-				tid = omp_get_thread_num();
-				debug_print("Thread %d says total threads are: %d\n", tid, omp_get_num_threads());
-			}
-			#endif
-			search_from(root, search, jobs_array[i], i);
-		}
-	}
-/*
+	// wait for all the tasks to finish
+	#pragma omp taskwait
+	N_GRAM found;
 	int j;
-	int first = 1;
-	for (i=0; i<jobs_array_ptr; ++i) {
-		if (result_start[i] != 0) {
-			if (!first) {
-				printf("|");
-				debug_print("|");
-			}
-			first = 0;
-			for (j=0; j<result_len[i]; ++j) {
-				printf("%c", search[j+result_start[i]]);
-				debug_print("%c", search[j+result_start[i]]);
-			}
+	for (i = 0; i < results_found - 1; ++i) {
+		found = search_state[results_list[i]];
+		// zero it for the next search
+		search_state[results_list[i]].start = 0;
+		for (j = found.start-1; j < found.start-1 + found.end; ++j) {
+			printf("%c", search[j]);
+			debug_print("%c", search[j]);
 		}
+		printf("|");
+		debug_print("|");
 	}
-	debug_print("\n");*/
-	result_text[result_text_ptr-1] = '\0';
-	printf("%s\n", result_text);
+	
+	// Avoid using if
+	found = search_state[results_list[i]];
+	search_state[results_list[i]].start = 0;
+	for (j = found.start-1; j < found.start-1 + found.end; ++j) {
+		printf("%c", search[j]);
+		debug_print("%c", search[j]);
+	}
+
+	printf("\n");
+	debug_print("\n");
 	fflush(stdout);
-	debug_print(" < in %d iterations!\n", iterator_counter);
+
 	return 0;
 }
 
-/*
-size_t fast_read(char **buffer, size_t *size) {
-	
-	char c;
-	size_t read = 0;
-	
-	while (((c = getchar_unlocked()) != '\n')) {
-	
-		if (read + 2 > *size) {
-			*size += INPUT_REALLOC_SIZE;
-			*buffer = realloc(*buffer, (*size) * sizeof(char));
-		}
-		(*buffer)[read++] = c;
-	}
-	(*buffer)[read] = '\0';
-	return read;
-}*/
 
-int main(){
+
+int main() {
 
 	NODE *trie = get_new_node();
 	trie->depth = 0;
-	
+
 	//maybe larger for fiewer reallocations
 	size_t len = 1024;
 	char *line = (char*)malloc(len * sizeof(char));
 	assert(line);
-	
-	size_t input_len;
+
+	int input_len;
 	size_t words_added = 0;
 
 	// while there is input read it
-	while ((input_len =  getline(&line, &len, stdin)) > 2 || 
-		  (line[0] != 'S')) {
+	while ((input_len = getline(&line, &len, stdin)) > 2 ||
+		(line[0] != 'S')) {
 
 		// add the \0 char replacing \n 
 		line[input_len - 1] = '\0';
@@ -280,49 +261,60 @@ int main(){
 	}
 	debug_print("Words added: %zu. Total nodes in trie: %d\n", words_added, next_empty_array);
 
-	// lets start our parallel code number of threads are set to maximum
-	// by default -> i think :P
-	// this one is run only by master thread (id = 0)
-	// input finished we are ready to read the queries
-	char action;
-			
-	// totaly ready to start
-	printf("R\n");
-	// TODO: find faster way to force fflush
-	fflush(stdout);
+	int i;
+	for (i = 0; i < MAX_NODES; ++i) {
+		search_state[i].start = 0;
+	}
 
-	int terminate = 0;
-	int action_count = 0;
-	int queries_count = 0;
-	while (!terminate) {
-		action = getchar_unlocked();
-		// read junk space
-		getchar_unlocked();
+	// TODO: remove thread num = 1
+	#pragma omp parallel set_num_threads(1)
+	{
+		#pragma omp master 
+		{
+			// this one is run only by master thread (id = 0)
+			// input finished we are ready to read the queries
+			char action;
 
-		// TDDO: implement fast input
-		// Read the rest of input
-		input_len = getline(&line, &len, stdin);
-		line[input_len-1] = '\0';
-		action_count++;
+			// totaly ready to start
+			printf("R\n");
+			// TODO: find faster way to force fflush
+			fflush(stdout);
 
-		debug_print("Selected action (%d) was: %c and input size was: %zu. Q: %d\n", action_count, action, input_len, queries_count);
-		switch (action) {
-			case 'Q':
-				queries_count++;
-				search_implementation(trie, line);
-				break;	
-			case 'A':
-				add_word(trie, line);
-				break;
-			case 'D':
-				remove_word(trie, line);
-				break;
-			case 'F':
-				terminate = 1;
+			int terminate = 0;
+			int action_count = 0;
+			int queries_count = 0;
+
+			while (!terminate) {
+				action = getchar();
+				// read junk space
+				getchar();
+
+				// TDDO: implement fast input
+				// Read the rest of input
+				input_len = getline(&line, &len, stdin);
+				line[input_len - 1] = '\0';
+				action_count++;
+
+				debug_print("Selected action (%d) was: %c and input size was: %d. Q: %d\n", action_count, action, input_len, queries_count);
+				switch (action) {
+				case 'Q':
+					queries_count++;
+					search_implementation(trie, line);
+					break;
+				case 'A':
+					add_word(trie, line);
+					break;
+				case 'D':
+					remove_word(trie, line);
+					break;
+				case 'F':
+					terminate = 1;
+					break;
+				}
+			}
 		}
 	}
 	
-	debug_print("\nTotal results found during runtime: %d\n", results_found);
 	free_node(trie);
 	debug_print("Nodes freed: %d\n", nodes_freed);
 	free(line);
