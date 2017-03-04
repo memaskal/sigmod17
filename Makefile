@@ -4,17 +4,18 @@ OMP=-fopenmp
 NOMP=-Wno-unknown-pragmas
 OPTIM_FLAGS=-O3
 
-
-EXECUTABLE=source
+SOURCES=src/source.c src/fast_read.c
+EXECUTABLE=source.out
 	
 all:
-	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(NOMP) src/$(EXECUTABLE).c -o $(EXECUTABLE).out
+	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(NOMP) $(SOURCES) -o $(EXECUTABLE)
 dbg:
-	$(CC) $(CFLAGS) $(OMP) src/$(EXECUTABLE).c -o $(EXECUTABLE).out
+	$(CC) $(CFLAGS) $(OMP) $(SOURCES) -o $(EXECUTABLE)
 omp:
-	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(OMP) src/$(EXECUTABLE).c -o $(EXECUTABLE).out
+	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(OMP) $(SOURCES) -o $(EXECUTABLE)
 noflags:
-	$(CC) src/$(EXECUTABLE).c -o $(EXECUTABLE).out
+	$(CC) $(SOURCES) -o $(EXECUTABLE)
 
 clean:
-	$(RM) $(EXECUTABLE).out
+	$(RM) $(EXECUTABLE)
+

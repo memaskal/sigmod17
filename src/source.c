@@ -27,6 +27,8 @@
 
 #define JOBS_SIZE 10000
 
+//#define INPUT_REALLOC_SIZE 64  // used in fast read
+
 typedef struct NODE {
 	struct NODE** children;
 	int word_ending; // NOTE: type for bool values
@@ -186,6 +188,23 @@ int search_implementation(NODE* root, char* search) {
 	return 0;
 }
 
+/*
+size_t fast_read(char **buffer, size_t *size) {
+	
+	char c;
+	size_t read = 0;
+	
+	while (((c = getchar_unlocked()) != '\n')) {
+	
+		if (read + 2 > *size) {
+			*size += INPUT_REALLOC_SIZE;
+			*buffer = realloc(*buffer, (*size) * sizeof(char));
+		}
+		(*buffer)[read++] = c;
+	}
+	(*buffer)[read] = '\0';
+	return read;
+}*/
 
 int main(){
 
@@ -200,8 +219,9 @@ int main(){
 	size_t input_len;
 	size_t words_added = 0;
 
+
 	// while there is input read it
-	while ((input_len = getline(&line, &len, stdin)) > 2 || 
+	while ((input_len =  fast_read(&line, &len, stdin)) > 2 || 
 		  (line[0] != 'S')) {
 
 		// add the \0 char replacing \n 
@@ -232,7 +252,7 @@ int main(){
 	
 			// TDDO: implement fast input
 			// Read the rest of input
-			input_len = getline(&line, &len, stdin);
+			input_len = fast_read(&line, &len, stdin);
 			line[input_len-1] = '\0';
 			debug_print("Selected action was: %c and input size was: %zu\n", action, input_len);
 			switch (action) {
