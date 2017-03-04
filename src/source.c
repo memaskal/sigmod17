@@ -10,7 +10,7 @@
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
 
 #ifndef NDEBUG
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
@@ -22,13 +22,13 @@
 							// TODO: fix all chars to unsigned chars
 
 #define MAX_NODES 100000
-#define MAX_WORD_LEN 400
+#define MAX_WORD_LEN 10000
 //#define MAX_SEARCH_LEN 10000
 
-#define NODE_ARRAY_SIZE 200
+#define NODE_ARRAY_SIZE 250
 #define NODE_ARRAY_OFFSET ' ' //character 0 for in node array
 
-#define JOBS_SIZE 10000
+#define JOBS_SIZE 50000
 
 //#define INPUT_REALLOC_SIZE 64  // used in fast read
 
@@ -85,6 +85,15 @@ void add_word(NODE* root, char* word_input) {
 	
 	assert(root);
 	assert(word);
+	if (	word[0] == 't' &&
+		word[1] == 'h' &&
+		word[2] == 'e' &&
+		word[3] == 'r' &&
+		word[4] == 'e' 
+		) {
+		debug_print("ADDING WORD: '%s'\n", word );
+	}
+
 
 	while (*word != '\0') {
 		assert(*word >= NODE_ARRAY_OFFSET);
@@ -124,9 +133,11 @@ int remove_word(NODE* root, char* word) {
 }
 int result_start[JOBS_SIZE] = {};
 int result_len[JOBS_SIZE];
-
+unsigned char result_text[100000] = "";
+int result_text_ptr;
 int search_from(NODE* root, char* search, int start, int job) {
 	unsigned int i;
+
 	NODE* current_node = root;
 	assert(current_node);
 	// TODO:
@@ -141,6 +152,11 @@ int search_from(NODE* root, char* search, int start, int job) {
 				results_found++;
 				result_start[job] = start;
 				result_len[job] = i-start;
+				unsigned int k;
+				for (k=start; k<i; ++k) {				
+					result_text[result_text_ptr++] = search[k];
+				}
+				result_text[result_text_ptr++] = '|';
 				search_state[current_node->id]++;
 			}
 		}
@@ -160,7 +176,7 @@ int search_implementation(NODE* root, char* search) {
 	// init search
 	iterator_counter = 0;
 	jobs_array_ptr = 0;
-
+	result_text_ptr = 0;
 	// NOTE: find optimised way to do this
 	for (i=0; i< next_empty_array; ++i) {
 		search_state[i] = 0;
@@ -169,13 +185,17 @@ int search_implementation(NODE* root, char* search) {
 
 	// NOTE: this needs to be done on input if we use getchar()
 	// make a job for each space character
-	for (i=0; search[i]!='\0'; ++i) {
+	//i = 0;
+	//while (search[i] == ' ' && search[i] != '\0') ++i;
+	//jobs_array[jobs_array_ptr++] = 0;
+	jobs_array[jobs_array_ptr++] = 0;
+	for (i=0; search[i] != '\0'; ++i) {		
 		if (search[i] == ' ') {
 			assert(jobs_array_ptr <= JOBS_SIZE);
 			jobs_array[jobs_array_ptr++] = i+1;
 		}
 	}
-	debug_print("Jobs added: %d\n", i);
+	debug_print("Jobs added: %d\n", jobs_array_ptr);
 	#ifdef _OPENMP
 	int tid;
 	#endif
@@ -194,17 +214,26 @@ int search_implementation(NODE* root, char* search) {
 			search_from(root, search, jobs_array[i], i);
 		}
 	}
+/*
 	int j;
+	int first = 1;
 	for (i=0; i<jobs_array_ptr; ++i) {
 		if (result_start[i] != 0) {
-			for (j=0; j<result_len[i]; ++j) {
-					printf("%c", search[j+result_start[i]]);
-					debug_print("%c", search[j+result_start[i]]);
+			if (!first) {
+				printf("|");
+				debug_print("|");
 			}
-			printf("|");
-			debug_print("|");
+			first = 0;
+			for (j=0; j<result_len[i]; ++j) {
+				printf("%c", search[j+result_start[i]]);
+				debug_print("%c", search[j+result_start[i]]);
+			}
 		}
 	}
+	debug_print("\n");*/
+	result_text[result_text_ptr-1] = '\0';
+	printf("%s\n", result_text);
+	fflush(stdout);
 	debug_print(" < in %d iterations!\n", iterator_counter);
 	return 0;
 }
@@ -240,7 +269,6 @@ int main(){
 	size_t input_len;
 	size_t words_added = 0;
 
-
 	// while there is input read it
 	while ((input_len =  getline(&line, &len, stdin)) > 2 || 
 		  (line[0] != 'S')) {
@@ -254,35 +282,46 @@ int main(){
 
 	// lets start our parallel code number of threads are set to maximum
 	// by default -> i think :P
-	{
-		{
-			// this one is run only by master thread (id = 0)
-			// input finished we are ready to read the queries
-			char action;
-					
-			// totaly ready to start
-			printf("R\n");
-			// TODO: find faster way to force fflush
-			fflush(stdout);
-	
-			action = getchar_unlocked();
-			// read junk space
-			getchar_unlocked();
-	
-			// TDDO: implement fast input
-			// Read the rest of input
-			input_len = getline(&line, &len, stdin);
-			line[input_len-1] = '\0';
-			debug_print("Selected action was: %c and input size was: %zu\n", action, input_len);
-			switch (action) {
-				case 'Q':
-					search_implementation(trie, line);
-					break;	
-				case 'A':
-					debug_print("A\n");
-			}		
-		}	
+	// this one is run only by master thread (id = 0)
+	// input finished we are ready to read the queries
+	char action;
+			
+	// totaly ready to start
+	printf("R\n");
+	// TODO: find faster way to force fflush
+	fflush(stdout);
+
+	int terminate = 0;
+	int action_count = 0;
+	int queries_count = 0;
+	while (!terminate) {
+		action = getchar_unlocked();
+		// read junk space
+		getchar_unlocked();
+
+		// TDDO: implement fast input
+		// Read the rest of input
+		input_len = getline(&line, &len, stdin);
+		line[input_len-1] = '\0';
+		action_count++;
+
+		debug_print("Selected action (%d) was: %c and input size was: %zu. Q: %d\n", action_count, action, input_len, queries_count);
+		switch (action) {
+			case 'Q':
+				queries_count++;
+				search_implementation(trie, line);
+				break;	
+			case 'A':
+				add_word(trie, line);
+				break;
+			case 'D':
+				remove_word(trie, line);
+				break;
+			case 'F':
+				terminate = 1;
+		}
 	}
+	
 	debug_print("\nTotal results found during runtime: %d\n", results_found);
 	free_node(trie);
 	debug_print("Nodes freed: %d\n", nodes_freed);
