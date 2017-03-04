@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <errno.h>
 #include <sys/time.h>
 
@@ -17,7 +18,7 @@ const unsigned long MAX_FAILED_QUERIES = 100;
 // Print the usage instructions for the harness
 void usage()
 {
-	std::cerr << "Usage: harness <init-file> <workload-file> <result-file> <test-executable>" << std::endl;
+	std::cerr << "Usage: harness <init-file> <workload-file> <result-file> <test-executable> [OPTIONAL (BETA): -v (run program within valgrind)]" << std::endl;
 }
 
 // Set a file descriptor to be non-blocking
@@ -71,13 +72,25 @@ ssize_t write_bytes(int fd, const void *buffer, size_t num_bytes)
 
 int main(int argc, char *argv[])
 {
+	bool useValgrind = false;
 	// Check for the correct number of arguments
-	if (argc != 5)
+	if (argc < 5)
 	{
 		usage();
 		exit(EXIT_FAILURE);
 	}
 
+	if (argc == 6) 
+	{
+		if (strcmp("-valgrind", argv[5]) == 0 || strcmp("-v", argv[5]) == 0) {
+			std::cerr << "\x1b[32mHARNESS: Debug running app with valgrind!\x1b[0m" << std::endl;
+			useValgrind = true;
+		}
+		else {
+			std::cerr << "\x1b[31mHARNESS: Unknown argument!\x1b[0m" << std::endl;
+		}
+		std::cerr << std::endl;
+	}
 	std::vector<std::string> input_batches;
 	std::vector<std::vector<std::string> > result_batches;
 
@@ -118,9 +131,7 @@ int main(int argc, char *argv[])
 				if (line.length() > 0 && (line[0] == 'Q' || line[0] == 'q'))
 				{
 					std::string result;
-                                       
 					std::getline(result_file,result);
-
 					result_chunk.push_back(result);
 				}
 			}
@@ -159,7 +170,14 @@ int main(int argc, char *argv[])
 		dup2(stdout_pipe[1], STDOUT_FILENO);
 		close(stdout_pipe[0]);
 		close(stdout_pipe[1]);
-		execlp(argv[4], argv[4], (char *) NULL);
+		if (useValgrind)
+		{
+			execlp("valgrind", "valgrind", "--leak-check=yes", argv[4], (char *) NULL);
+		}
+		else
+		{
+			execlp(argv[4], argv[4], (char *)NULL);
+		}
 		perror("execlp");
 		exit(EXIT_FAILURE);
 	}
