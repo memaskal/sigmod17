@@ -5,6 +5,9 @@
 // NOTE: do we need type control?
 // #include <stdint.h>
 #include <assert.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 // Debugging defines
 //#define NDEBUG
@@ -119,8 +122,10 @@ int remove_word(NODE* root, char* word) {
 	current_node->word_ending = 0;
 	return 1;
 }
+int result_start[JOBS_SIZE] = {};
+int result_len[JOBS_SIZE];
 
-int search_from(NODE* root, char* search, int start) {
+int search_from(NODE* root, char* search, int start, int job) {
 	unsigned int i;
 	NODE* current_node = root;
 	assert(current_node);
@@ -129,18 +134,13 @@ int search_from(NODE* root, char* search, int start) {
 	for (i=start; i<strlen(search)+1; ++i) {
 		iterator_counter++;
 		assert(current_node);
-		if (current_node->word_ending == 1 && search_state[current_node->id] == 0 && (search[i] == ' ' || search[i] == '\0')) {
+		
+		if (current_node->word_ending == 1 && (search[i] == ' ' || search[i] == '\0')) {
 			#pragma omp critical
-			{
-				int j;
-				for (j=start; j < current_node->depth+start; ++j) {
-					printf("%c", search[j]);
-					debug_print("%c", search[j]);
-					results_found++;
-				}
-				printf("|");
-				debug_print("|");
-			
+			if (search_state[current_node->id] == 0) {
+				results_found++;
+				result_start[job] = start;
+				result_len[job] = i-start;
 				search_state[current_node->id]++;
 			}
 		}
@@ -171,19 +171,40 @@ int search_implementation(NODE* root, char* search) {
 	// make a job for each space character
 	for (i=0; search[i]!='\0'; ++i) {
 		if (search[i] == ' ') {
+			assert(jobs_array_ptr <= JOBS_SIZE);
 			jobs_array[jobs_array_ptr++] = i+1;
 		}
 	}
 	debug_print("Jobs added: %d\n", i);
-
+	#ifdef _OPENMP
+	int tid;
+	#endif
 	// execute all jobs
-	for (i=0; i<jobs_array_ptr; ++i) {
-		#pragma omp task 
-		{	
-			search_from(root, search, jobs_array[i]);
+	#pragma omp parallel shared(search_state) private(i,tid)
+	{
+
+		#pragma omp for schedule(dynamic, 100)
+		for (i=0; i<jobs_array_ptr; ++i) {
+			#ifdef _OPENMP
+			if (i==0) {
+				tid = omp_get_thread_num();
+				debug_print("Thread %d says total threads are: %d\n", tid, omp_get_num_threads());
+			}
+			#endif
+			search_from(root, search, jobs_array[i], i);
 		}
 	}
-	#pragma omp taskwait
+	int j;
+	for (i=0; i<jobs_array_ptr; ++i) {
+		if (result_start[i] != 0) {
+			for (j=0; j<result_len[i]; ++j) {
+					printf("%c", search[j+result_start[i]]);
+					debug_print("%c", search[j+result_start[i]]);
+			}
+			printf("|");
+			debug_print("|");
+		}
+	}
 	debug_print(" < in %d iterations!\n", iterator_counter);
 	return 0;
 }
@@ -221,7 +242,7 @@ int main(){
 
 
 	// while there is input read it
-	while ((input_len =  fast_read(&line, &len, stdin)) > 2 || 
+	while ((input_len =  getline(&line, &len, stdin)) > 2 || 
 		  (line[0] != 'S')) {
 
 		// add the \0 char replacing \n 
@@ -233,9 +254,7 @@ int main(){
 
 	// lets start our parallel code number of threads are set to maximum
 	// by default -> i think :P
-	#pragma omp parallel
 	{
-		#pragma omp master
 		{
 			// this one is run only by master thread (id = 0)
 			// input finished we are ready to read the queries
@@ -252,7 +271,7 @@ int main(){
 	
 			// TDDO: implement fast input
 			// Read the rest of input
-			input_len = fast_read(&line, &len, stdin);
+			input_len = getline(&line, &len, stdin);
 			line[input_len-1] = '\0';
 			debug_print("Selected action was: %c and input size was: %zu\n", action, input_len);
 			switch (action) {
@@ -262,7 +281,6 @@ int main(){
 				case 'A':
 					debug_print("A\n");
 			}		
-			#pragma omp taskwait
 		}	
 	}
 	debug_print("\nTotal results found during runtime: %d\n", results_found);
