@@ -10,7 +10,7 @@
 #endif
 
 // Debugging defines
-#define NDEBUG
+//#define NDEBUG
 
 #ifndef NDEBUG
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
@@ -181,6 +181,24 @@ void search_from(NODE* root, const char* search, const size_t start) {
 	}
 }
 
+int comparator(const N_GRAM* left, const N_GRAM* right) {
+	if (left->start != right->start) {
+		return (left->start > right->start) ? 1 : -1;
+	}
+	return (left->end > right->end) ? 1 : -1;
+}
+
+void swap(N_GRAM* left, N_GRAM* right) {
+	static N_GRAM temp;
+	temp.start = left->start;
+	temp.end = left->end;
+	
+	left->start = right->start;
+	left->end = right->end;
+
+	right->start = temp.start;
+	right->end = temp.end;
+}
 
 int search_implementation(NODE* root, const char* search) {
 
@@ -192,25 +210,64 @@ int search_implementation(NODE* root, const char* search) {
 
 	// set to zero for the new search
 	results_found = 0;
- 
-	#pragma omp task 
+	
 	search_from(root, search, 0);
-
-	// NOTE: n_start > search, no need for pntr_diff types
 	n_start = search;
+	size_t search_len = strlen(search);
 
-	for (; *n_start != '\0'; ++n_start) {
-		if (*n_start == ' ') {
-			#pragma omp task
-			search_from(root, n_start + 1, n_start - search + 1);
+	#pragma omp parallel shared(search) private(i) num_threads(4)
+	{
+		// NOTE: n_start > search, no need for pntr_diff types
+		#pragma omp for schedule(dynamic, 18) nowait
+		for (i=1; i<search_len; ++i) {
+			if (search[i] == ' ') {
+//				#pragma omp task
+				search_from(root, search + i + 1, i + 1);
+			}
 		}
-	}
 
-	// wait for all the tasks to finish
-	#pragma omp taskwait
-	// TODO: handle this with an if 
+		// wait for all the tasks to finish
+		#pragma omp barrier
+		int threads = omp_get_num_threads();
+		int id = omp_get_thread_num();
+		size_t start_pos; 
+  
+
+   
+		for (i = 0; i < results_found; ++i) {
+			start_pos = id * 2 + (i % 2);
+   
+			while (start_pos < results_found - 1) {
+				if (comparator(&search_state[results_list[start_pos]], &search_state[results_list[start_pos + 1]]) > 0) {
+					//swap results
+					unsigned int temp_id = results_list[start_pos];
+					results_list[start_pos] = results_list[start_pos + 1];
+					results_list[start_pos + 1] = temp_id;   
+				} 
+				start_pos += threads * 2;
+			}
+			#pragma omp barrier  
+		}
+
+	} // end of pragma omp parallel
+	
+
+/* OLD INSERTION SORT CODE
+
 	assert(results_found > 0);
 
+	size_t n = results_found;
+	size_t j;
+	for (i=1; i<n; ++i) {
+		j = i;
+		while (j>0 && comparator(&search_state[results_list[j-1]], &search_state[results_list[j]])>0) {
+			swap(&search_state[results_list[j]], &search_state[results_list[j-1]]);
+			--j;
+		}
+
+	}
+
+*/
 	for (i = 0; i < results_found - 1; ++i) {
 
 		found = search_state[results_list[i]];
@@ -222,10 +279,10 @@ int search_implementation(NODE* root, const char* search) {
 
 		for (; n_start < n_end; ++n_start) {
 			printf("%c", *n_start);
-			debug_print("%c", *n_start);
+			//debug_print("%c", *n_start);
 		}
 		printf("|");
-		debug_print("|");
+		//debug_print("|");
 	}
 
 
@@ -238,11 +295,11 @@ int search_implementation(NODE* root, const char* search) {
 
 	for (; n_start < n_end; ++n_start) {
 		printf("%c", *n_start);
-		debug_print("%c", *n_start);
+//		debug_print("%c", *n_start);
 	}
 
 	printf("\n");
-	debug_print("\n");
+//	debug_print("\n");
 	fflush(stdout);
 	
 	return 0;
@@ -272,30 +329,28 @@ int main() {
 		add_word(trie, line);
 		words_added++;
 	}
-	debug_print("Words added: %zu. Total nodes in trie: %d\n", words_added, next_empty_array);
+	debug_print("Words added: %zu. Total nodes in trie: %zu\n", words_added, next_empty_array);
 
 	size_t i;
 	for (i = 0; i < MAX_NODES; ++i) {
 		search_state[i].start = MAX_VAL;
 	}
 
-	// TODO: remove thread num = 1
-	#pragma omp parallel set_num_threads(1)
+	char action;
+	int terminate = 0;
+	int action_count = 0;
+	int queries_count = 0;
+
+
+	// totaly ready to start
+	printf("R\n");
+	// TODO: find faster way to force fflush
+	fflush(stdout);
+
+	#pragma omp parallel
 	{
 		#pragma omp master 
 		{
-			// this one is run only by master thread (id = 0)
-			// input finished we are ready to read the queries
-			char action;
-
-			// totaly ready to start
-			printf("R\n");
-			// TODO: find faster way to force fflush
-			fflush(stdout);
-
-			int terminate = 0;
-			int action_count = 0;
-			int queries_count = 0;
 
 			while (!terminate) {
 				action = getchar();
@@ -308,7 +363,6 @@ int main() {
 				line[input_len - 1] = '\0';
 				action_count++;
 
-				debug_print("Selected action (%d) was: %c and input size was: %d. Q: %d\n", action_count, action, input_len, queries_count);
 				switch (action) {
 				case 'Q':
 					queries_count++;
