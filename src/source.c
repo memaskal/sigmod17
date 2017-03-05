@@ -2,9 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
 // NOTE: do we need type control?
-// #include <stdint.h>
+#include <stdint.h>
 #include <assert.h>
 #ifdef _OPENMP
 #include <omp.h>
@@ -14,10 +13,9 @@
 #define NDEBUG
 
 #ifndef NDEBUG
-#include <string.h>
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
 #else
-#define debug_print(...)  do{ }while(0);
+#define debug_print(...)  do{ }while(0)
 	#ifdef _MSC_VER /* VS PORTABILITY. */
 	#define getline vs_getline
 
@@ -35,21 +33,22 @@
 // TODO: fix all chars to unsigned chars
 
 
+#define MAX_VAL SIZE_MAX
 #define MAX_NODES 100000
 #define NODE_ARRAY_SIZE 256
 #define NODE_ARRAY_OFFSET ' '	 //character 0 for in node array
 
 typedef struct NODE {
-	struct NODE** children;
 	int word_ending;			// NOTE: type for bool values
 	int depth;
 	unsigned int id;			// offset in the node arrays
+	struct NODE** children;
 } NODE;
 
 
 typedef struct N_GRAM {
-	int start;
-	int end;
+	size_t start;
+	size_t end;
 } N_GRAM;
 
 
@@ -57,10 +56,10 @@ typedef struct N_GRAM {
 NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = { };
 N_GRAM search_state[MAX_NODES];
 
-int results_list[MAX_NODES]; // max nodes
-int results_found = 0; // free spot 
+unsigned int results_list[MAX_NODES]; // max nodes
+size_t results_found = 0; // free spot 
 
-int next_empty_array = 0; //used by get_new_node
+size_t next_empty_array = 0; //used by get_new_node
 
 // only for debuging
 int nodes_freed = 0;
@@ -141,7 +140,7 @@ int remove_word(NODE* root, char* word) {
 	return 1;
 }
 
-void search_from(NODE* root, char* search, const int start) {
+void search_from(NODE* root, const char* search, const size_t start) {
 
 	NODE* current_node = root;
 
@@ -154,13 +153,13 @@ void search_from(NODE* root, char* search, const int start) {
 
 		if (current_node->word_ending == 1 && (*search == ' ' || *search == '\0')) {
 			#pragma omp critical
-			if (search_state[current_node->id].start == 0 || start < search_state[current_node->id].start) {
+			if (start < search_state[current_node->id].start) {
 
-				if (search_state[current_node->id].start == 0) {
+				if (search_state[current_node->id].start == MAX_VAL) {
 					results_list[results_found++] = current_node->id;
 				}
 
-				search_state[current_node->id].start = start + 1;
+				search_state[current_node->id].start = start;
 				search_state[current_node->id].end = search - str_start;
 				// list will be used to find the results and zero the search_state table
 			}
@@ -172,66 +171,80 @@ void search_from(NODE* root, char* search, const int start) {
 	if (current_node != NULL && *search == '\0' && current_node->word_ending == 1) {
 
 		#pragma omp critical
-		if (search_state[current_node->id].start == 0 || start < search_state[current_node->id].start) {
-			if (search_state[current_node->id].start == 0) {
+		if (start < search_state[current_node->id].start) {
+			if (search_state[current_node->id].start == MAX_VAL) {
 				results_list[results_found++] = current_node->id;
 			}
-			search_state[current_node->id].start = start + 1;
+			search_state[current_node->id].start = start;
 			search_state[current_node->id].end = search - str_start;
 		}
 	}
 }
 
 
-int search_implementation(NODE *root, char *search) {
+int search_implementation(NODE* root, const char* search) {
 
 	// This should only be run by master thread
-	int i;
-	
+	size_t i;
+	N_GRAM found;
+	const char* n_start;
+	const char* n_end;
+
 	// set to zero for the new search
 	results_found = 0;
+ 
+	#pragma omp task 
+	search_from(root, search, 0);
 
-	i = 0;
-	//while (search[i] == ' ') ++i;
-	#pragma omp task
-	search_from(root, search + i, i);
+	// NOTE: n_start > search, no need for pntr_diff types
+	n_start = search;
 
-
-	for (; search[i] != '\0'; ++i) {
-		if (search[i] == ' ') {
+	for (; *n_start != '\0'; ++n_start) {
+		if (*n_start == ' ') {
 			#pragma omp task
-			search_from(root, search + i + 1, i + 1);
+			search_from(root, n_start + 1, n_start - search + 1);
 		}
 	}
 
 	// wait for all the tasks to finish
 	#pragma omp taskwait
-	N_GRAM found;
-	int j;
+	// TODO: handle this with an if 
+	assert(results_found > 0);
+
 	for (i = 0; i < results_found - 1; ++i) {
+
 		found = search_state[results_list[i]];
 		// zero it for the next search
-		search_state[results_list[i]].start = 0;
-		for (j = found.start-1; j < found.start-1 + found.end; ++j) {
-			printf("%c", search[j]);
-			debug_print("%c", search[j]);
+		search_state[results_list[i]].start = MAX_VAL;
+
+		n_start = (search + found.start);
+		n_end = (n_start + found.end);
+
+		for (; n_start < n_end; ++n_start) {
+			printf("%c", *n_start);
+			debug_print("%c", *n_start);
 		}
 		printf("|");
 		debug_print("|");
 	}
-	
-	// Avoid using if
+
+
 	found = search_state[results_list[i]];
-	search_state[results_list[i]].start = 0;
-	for (j = found.start-1; j < found.start-1 + found.end; ++j) {
-		printf("%c", search[j]);
-		debug_print("%c", search[j]);
+	// zero it for the next search
+	search_state[results_list[i]].start = MAX_VAL;
+
+	n_start = (search + found.start);
+	n_end = (n_start + found.end);
+
+	for (; n_start < n_end; ++n_start) {
+		printf("%c", *n_start);
+		debug_print("%c", *n_start);
 	}
 
 	printf("\n");
 	debug_print("\n");
 	fflush(stdout);
-
+	
 	return 0;
 }
 
@@ -261,9 +274,9 @@ int main() {
 	}
 	debug_print("Words added: %zu. Total nodes in trie: %d\n", words_added, next_empty_array);
 
-	int i;
+	size_t i;
 	for (i = 0; i < MAX_NODES; ++i) {
-		search_state[i].start = 0;
+		search_state[i].start = MAX_VAL;
 	}
 
 	// TODO: remove thread num = 1
