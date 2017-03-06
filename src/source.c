@@ -4,13 +4,20 @@
 #include <time.h>
 // NOTE: do we need type control?
 #include <stdint.h>
-#include <assert.h>
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
+#include <assert.h>
+
+// PARALLEL CONFIGURATION
+//#define PARALLEL_SORT
+#define NUM_THREADS 3
+#define PARALLEL_CHUNK_SIZE 750
+
 
 #ifndef NDEBUG
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
@@ -31,6 +38,9 @@
 
 #pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
 // TODO: fix all chars to unsigned chars
+
+
+
 
 
 #define MAX_VAL SIZE_MAX
@@ -215,19 +225,19 @@ int search_implementation(NODE* root, const char* search) {
 	n_start = search;
 	size_t search_len = strlen(search);
 
-	#pragma omp parallel shared(search) private(i) num_threads(4)
+	#pragma omp parallel shared(search) private(i) num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
-		#pragma omp for schedule(dynamic, 18) nowait
+		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE) nowait
 		for (i=1; i<search_len; ++i) {
 			if (search[i] == ' ') {
-//				#pragma omp task
 				search_from(root, search + i + 1, i + 1);
 			}
 		}
 
 		// wait for all the tasks to finish
 		#pragma omp barrier
+		#ifdef PARALLEL_SORT
 		int threads = omp_get_num_threads();
 		int id = omp_get_thread_num();
 		size_t start_pos; 
@@ -248,27 +258,30 @@ int search_implementation(NODE* root, const char* search) {
 			}
 			#pragma omp barrier  
 		}
+		#endif // PARALLEL_SORT
 
 	} // end of pragma omp parallel
 	
 
-/* OLD INSERTION SORT CODE
-
+	// Serial insertion sort
+#ifndef PARALLEL_SORT
 	assert(results_found > 0);
+	int j;
+	int temp;
 
-	size_t n = results_found;
-	size_t j;
-	for (i=1; i<n; ++i) {
-		j = i;
-		while (j>0 && comparator(&search_state[results_list[j-1]], &search_state[results_list[j]])>0) {
-			swap(&search_state[results_list[j]], &search_state[results_list[j-1]]);
+	for (i=1; i<results_found; ++i) {
+		temp = results_list[i];
+		j = i - 1;
+		while (j>=0 && comparator(&search_state[temp], &search_state[results_list[j]])<0) {
+
+			results_list[j+1] = results_list[j];
 			--j;
 		}
-
+		results_list[j+1] = temp;
 	}
+#endif // PARALLEL_SORT
 
-*/
-	for (i = 0; i < results_found - 1; ++i) {
+	for (i=0; i<results_found-1; ++i) {
 
 		found = search_state[results_list[i]];
 		// zero it for the next search
@@ -279,15 +292,14 @@ int search_implementation(NODE* root, const char* search) {
 
 		for (; n_start < n_end; ++n_start) {
 			printf("%c", *n_start);
-			//debug_print("%c", *n_start);
+//			debug_print("%c", *n_start);
 		}
 		printf("|");
-		//debug_print("|");
+//		debug_print("|");
 	}
 
 
 	found = search_state[results_list[i]];
-	// zero it for the next search
 	search_state[results_list[i]].start = MAX_VAL;
 
 	n_start = (search + found.start);
@@ -347,9 +359,9 @@ int main() {
 	// TODO: find faster way to force fflush
 	fflush(stdout);
 
-	#pragma omp parallel
+	//#pragma omp parallel
 	{
-		#pragma omp master 
+		//#pragma omp master 
 		{
 
 			while (!terminate) {
