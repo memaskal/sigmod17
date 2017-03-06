@@ -12,7 +12,7 @@
 #include <fstream>
 #include <sstream>
 
-const unsigned BATCH_SIZE = 10000;
+const unsigned BATCH_SIZE = 200000;
 const unsigned long MAX_FAILED_QUERIES = 10000;
 
 // Print the usage instructions for the harness
