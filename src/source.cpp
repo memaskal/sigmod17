@@ -30,13 +30,13 @@
 #else
 #define debug_print(...)  do{ }while(0)
 	#ifdef _MSC_VER /* VS PORTABILITY. */
-	#define getline vs_getline
+	/*#define getline vs_getline
 
 	int vs_getline(char** line, size_t* len, FILE* f) {
 		fgets(*line, *len, f);
 		return strlen(*line);
 	}
-
+*/
 	#endif // _MSC_VER
 #endif // NDEBUG
 
@@ -52,7 +52,7 @@ class NODE {
 public:
 	static size_t total;
 	
-	NODE::NODE() {
+	NODE() {
 		word_ending = 0;
 		depth = 0;
 		id = total++;
@@ -124,7 +124,6 @@ void add_word(NODE* root, char* word_input) {
 int remove_word(NODE* root, char* word) {
 
 	NODE* current_node = root;
-	NODE* new_node;
 
 	assert(root);
 	assert(word);

@@ -1,10 +1,10 @@
-CC=gcc
+CC=g++
 CFLAGS=-Wall -Wextra -Wchar-subscripts -Werror
 OMP=-fopenmp
 NOMP=-Wno-unknown-pragmas
 OPTIM_FLAGS=-O3
 
-SOURCES=src/source.c src/fast_read.c
+SOURCES=src/source.cpp
 EXECUTABLE=source.out
 	
 all:
