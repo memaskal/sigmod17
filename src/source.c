@@ -10,14 +10,14 @@
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 4
+#define NUM_THREADS 3
 #define PARALLEL_CHUNK_SIZE 750
- 
+
 
 #ifndef NDEBUG
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
@@ -44,11 +44,9 @@
 
 
 #define MAX_VAL SIZE_MAX
-#define MAX_NODES 70 * 100000
-#define NODE_ARRAY_SIZE 220
-#define NODE_ARRAY_OFFSET 32	 //character 0 for in node array
-
-// max char given: 226
+#define MAX_NODES 100000
+#define NODE_ARRAY_SIZE 256
+#define NODE_ARRAY_OFFSET ' '	 //character 0 for in node array
 
 typedef struct NODE {
 	int word_ending;			// NOTE: type for bool values
@@ -65,8 +63,7 @@ typedef struct N_GRAM {
 
 
 // Static for now. NOTE: need to test big sized arrays for static vs dynamic
-//NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = { };
-NODE*** node_arrays;
+NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = { };
 N_GRAM search_state[MAX_NODES];
 
 unsigned int results_list[MAX_NODES]; // max nodes
@@ -106,23 +103,19 @@ void free_node(NODE* root) {
 	free(root);
 	++nodes_freed;
 }
-static unsigned char minchar = 255;
-static unsigned char maxchar = 0;
-size_t given_chars[255] = {}; 
 
-void add_word(NODE* root, unsigned char* word) {
+
+void add_word(NODE* root, char* word_input) {
 	
 	NODE* current_node = root;
+	char *word = word_input;
 
 	assert(root);
 	assert(word);
-	assert(word[0] != '\0');
-	assert(word[0] != ' ');
 
 	while (*word != '\0') {
-		given_chars[*word]++;
-
 		assert(*word >= NODE_ARRAY_OFFSET);
+
 		if (!current_node->children[*word]) {
 			current_node->children[*word] = get_new_node();
 			current_node->children[*word]->depth = current_node->depth + 1;
@@ -138,7 +131,7 @@ void add_word(NODE* root, unsigned char* word) {
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
-int remove_word(NODE* root, unsigned char* word) {
+int remove_word(NODE* root, char* word) {
 
 	NODE* current_node = root;
 
@@ -269,44 +262,29 @@ int search_implementation(NODE* root, const char* search) {
 
 	} // end of pragma omp parallel
 	
-	if (results_found > 0){
-		// Serial insertion sort
-	#ifndef PARALLEL_SORT
-		//assert(results_found > 0);
-		int j;
-		int temp;
 
-		for (i=1; i<results_found; ++i) {
-			temp = results_list[i];
-			j = i - 1;
-			while (j>=0 && comparator(&search_state[temp], &search_state[results_list[j]])<0) {
+	// Serial insertion sort
+#ifndef PARALLEL_SORT
+	assert(results_found > 0);
+	int j;
+	int temp;
 
-				results_list[j+1] = results_list[j];
-				--j;
-			}
-			results_list[j+1] = temp;
+	for (i=1; i<results_found; ++i) {
+		temp = results_list[i];
+		j = i - 1;
+		while (j>=0 && comparator(&search_state[temp], &search_state[results_list[j]])<0) {
+
+			results_list[j+1] = results_list[j];
+			--j;
 		}
-	#endif // PARALLEL_SORT
+		results_list[j+1] = temp;
+	}
+#endif // PARALLEL_SORT
 
-		for (i=0; i<results_found-1; ++i) {
-
-			found = search_state[results_list[i]];
-			// zero it for the next search
-			search_state[results_list[i]].start = MAX_VAL;
-
-			n_start = (search + found.start);
-			n_end = (n_start + found.end);
-
-			for (; n_start < n_end; ++n_start) {
-				printf("%c", *n_start);
-	//			debug_print("%c", *n_start);
-			}
-			printf("|");
-	//		debug_print("|");
-		}
-
+	for (i=0; i<results_found-1; ++i) {
 
 		found = search_state[results_list[i]];
+		// zero it for the next search
 		search_state[results_list[i]].start = MAX_VAL;
 
 		n_start = (search + found.start);
@@ -314,12 +292,24 @@ int search_implementation(NODE* root, const char* search) {
 
 		for (; n_start < n_end; ++n_start) {
 			printf("%c", *n_start);
-	//		debug_print("%c", *n_start);
+//			debug_print("%c", *n_start);
 		}
+		printf("|");
+//		debug_print("|");
 	}
-	else{
-		printf("-1");
+
+
+	found = search_state[results_list[i]];
+	search_state[results_list[i]].start = MAX_VAL;
+
+	n_start = (search + found.start);
+	n_end = (n_start + found.end);
+
+	for (; n_start < n_end; ++n_start) {
+		printf("%c", *n_start);
+//		debug_print("%c", *n_start);
 	}
+
 	printf("\n");
 //	debug_print("\n");
 	fflush(stdout);
@@ -330,13 +320,6 @@ int search_implementation(NODE* root, const char* search) {
 
 
 int main() {
-
-//NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = { };
-	node_arrays = (NODE ***)malloc(MAX_NODES * sizeof(NODE **));
-	int k;
-	for (k=0; k<MAX_NODES; ++k) {
-		node_arrays[k] = (NODE **)malloc(NODE_ARRAY_SIZE * sizeof(NODE *));
-	}
 
 	NODE *trie = get_new_node();
 	trie->depth = 0;
@@ -355,16 +338,10 @@ int main() {
 
 		// add the \0 char replacing \n 
 		line[input_len - 1] = '\0';
-		add_word(trie, (unsigned char *)line);
-		//if (words_added % 500 == 0) 	debug_print("Words added: %zu. Total nodes in trie: %zu\n", words_added, next_empty_array);
+		add_word(trie, line);
 		words_added++;
 	}
 	debug_print("Words added: %zu. Total nodes in trie: %zu\n", words_added, next_empty_array);
-
-
-//	for (k=0; k<255; ++k){
-//		debug_print("For char %d, '%c':\t%zu\n", k,k, given_chars[k]);
-//	}
 
 	size_t i;
 	for (i = 0; i < MAX_NODES; ++i) {
@@ -397,17 +374,17 @@ int main() {
 				input_len = getline(&line, &len, stdin);
 				line[input_len - 1] = '\0';
 				action_count++;
-				if(action_count%1000 == 0)debug_print("Actions: %d\n", action_count);
+
 				switch (action) {
 				case 'Q':
 					queries_count++;
 					search_implementation(trie, line);
 					break;
 				case 'A':
-					add_word(trie, (unsigned char *)line);
+					add_word(trie, line);
 					break;
 				case 'D':
-					remove_word(trie, (unsigned char *)line);
+					remove_word(trie, line);
 					break;
 				case 'F':
 					terminate = 1;
