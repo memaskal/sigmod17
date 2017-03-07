@@ -25,32 +25,22 @@
 #define debug_print(...)  do{ }while(0)
 	#ifdef _MSC_VER /* VS PORTABILITY. */
 	#define getline vs_getline
-
 	int vs_getline(char** line, size_t* len, FILE* f) {
 		fgets(*line, *len, f);
 		return strlen(*line);
 	}
-
-
 	#endif // _MSC_VER
 #endif // NDEBUG
 
 
-#pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
-// TODO: fix all chars to unsigned chars
-
-
-
-
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types" // to use getline with unsigned char
 
 #define MAX_VAL SIZE_MAX
 #define MAX_NODES 100000
 #define NODE_ARRAY_SIZE 256
-#define NODE_ARRAY_OFFSET ' '	 //character 0 for in node array
 
 typedef struct NODE {
 	int word_ending;			// NOTE: type for bool values
-	int depth;
 	unsigned int id;			// offset in the node arrays
 	struct NODE** children;
 } NODE;
@@ -74,7 +64,17 @@ size_t next_empty_array = 0; //used by get_new_node
 // only for debuging
 int nodes_freed = 0;
 int iterator_counter = 0;
+int action_count = 0;
+int queries_count = 0;
+size_t words_added = 0;
 
+
+int comparator(const N_GRAM* left, const N_GRAM* right) {
+	if (left->start != right->start) {
+		return (left->start > right->start) ? 1 : -1;
+	}
+	return (left->end > right->end) ? 1 : -1;
+}
 
 NODE* get_new_node() {
 	assert(next_empty_array < MAX_NODES);
@@ -84,13 +84,11 @@ NODE* get_new_node() {
 	node->word_ending = 0;
 	node->id = next_empty_array;
 
-	// TODO: next empty array Increment should be an atomic
+	// TODO: next empty array Increment should be an atomic if we use parallel add
 	node->children = node_arrays[next_empty_array++];
-	// TODO : benchmark with calloc
-	//node->children = (NODE **)calloc(NODE_ARRAY_SIZE, sizeof(NODE*));
+
 	return node;
 }
-
 
 void free_node(NODE* root) {
 	assert(root);
@@ -105,20 +103,17 @@ void free_node(NODE* root) {
 }
 
 
-void add_word(NODE* root, char* word_input) {
+void add_word(NODE* root, unsigned char* word) {
 	
 	NODE* current_node = root;
-	char *word = word_input;
 
 	assert(root);
 	assert(word);
 
 	while (*word != '\0') {
-		assert(*word >= NODE_ARRAY_OFFSET);
 
 		if (!current_node->children[*word]) {
 			current_node->children[*word] = get_new_node();
-			current_node->children[*word]->depth = current_node->depth + 1;
 		}
 
 		current_node = current_node->children[*word];
@@ -131,7 +126,7 @@ void add_word(NODE* root, char* word_input) {
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
-int remove_word(NODE* root, char* word) {
+int remove_word(NODE* root, unsigned char* word) {
 
 	NODE* current_node = root;
 
@@ -150,14 +145,14 @@ int remove_word(NODE* root, char* word) {
 	return 1;
 }
 
-void search_from(NODE* root, const char* search, const size_t start) {
+void search_from(NODE* root, unsigned char* search, const size_t start) {
 
 	NODE* current_node = root;
 
 	assert(root);
 	assert(search);
 
-	const char *str_start = search;
+	unsigned char *str_start = search;
 
 	while (*search != '\0' && current_node != NULL) {
 
@@ -191,52 +186,30 @@ void search_from(NODE* root, const char* search, const size_t start) {
 	}
 }
 
-int comparator(const N_GRAM* left, const N_GRAM* right) {
-	if (left->start != right->start) {
-		return (left->start > right->start) ? 1 : -1;
-	}
-	return (left->end > right->end) ? 1 : -1;
-}
-
-void swap(N_GRAM* left, N_GRAM* right) {
-	static N_GRAM temp;
-	temp.start = left->start;
-	temp.end = left->end;
-	
-	left->start = right->start;
-	left->end = right->end;
-
-	right->start = temp.start;
-	right->end = temp.end;
-}
-
-int search_implementation(NODE* root, const char* search) {
+int search_implementation(NODE* root, unsigned char* search, size_t length) {
 
 	// This should only be run by master thread
 	size_t i;
 	N_GRAM found;
-	const char* n_start;
-	const char* n_end;
+	unsigned char* n_start;
+	unsigned char* n_end;
 
 	// set to zero for the new search
 	results_found = 0;
 	
 	search_from(root, search, 0);
 	n_start = search;
-	size_t search_len = strlen(search);
 
 	#pragma omp parallel shared(search) private(i) num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
-		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE) nowait
-		for (i=1; i<search_len; ++i) {
+		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE)
+		for (i=1; i<length; ++i) {
 			if (search[i] == ' ') {
 				search_from(root, search + i + 1, i + 1);
 			}
 		}
 
-		// wait for all the tasks to finish
-		#pragma omp barrier
 		#ifdef PARALLEL_SORT
 		int threads = omp_get_num_threads();
 		int id = omp_get_thread_num();
@@ -261,11 +234,18 @@ int search_implementation(NODE* root, const char* search) {
 		#endif // PARALLEL_SORT
 
 	} // end of pragma omp parallel
-	
 
-	// Serial insertion sort
+
+	if (!results_found) {
+		printf("-1\n");
+		fflush(stdout);
+		return 0;
+	}
+
+
+// Serial insertion sort
 #ifndef PARALLEL_SORT
-	assert(results_found > 0);
+
 	int j;
 	int temp;
 
@@ -317,20 +297,15 @@ int search_implementation(NODE* root, const char* search) {
 	return 0;
 }
 
-
-
 int main() {
 
 	NODE *trie = get_new_node();
-	trie->depth = 0;
 
-	//maybe larger for fiewer reallocations
-	size_t len = 1024;
-	char *line = (char*)malloc(len * sizeof(char));
+	size_t len = 100000;
+	unsigned char *line = (unsigned char*)malloc(len * sizeof(char));
 	assert(line);
 
 	int input_len;
-	size_t words_added = 0;
 
 	// while there is input read it
 	while ((input_len = getline(&line, &len, stdin)) > 2 ||
@@ -350,9 +325,6 @@ int main() {
 
 	char action;
 	int terminate = 0;
-	int action_count = 0;
-	int queries_count = 0;
-
 
 	// totaly ready to start
 	printf("R\n");
@@ -378,7 +350,7 @@ int main() {
 				switch (action) {
 				case 'Q':
 					queries_count++;
-					search_implementation(trie, line);
+					search_implementation(trie, line, input_len);
 					break;
 				case 'A':
 					add_word(trie, line);
