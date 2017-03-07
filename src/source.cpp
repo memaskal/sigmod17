@@ -5,6 +5,10 @@
 // NOTE: do we need type control?
 #include <stdint.h>
 
+#include <list>
+#include <map>
+
+
 #ifdef _OPENMP
 #include <omp.h>
 #endif
@@ -18,6 +22,8 @@
 #define NUM_THREADS 3
 #define PARALLEL_CHUNK_SIZE 750
 
+// define max value
+#define MAX_VAL SIZE_MAX
 
 #ifndef NDEBUG
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
@@ -31,7 +37,6 @@
 		return strlen(*line);
 	}
 
-
 	#endif // _MSC_VER
 #endif // NDEBUG
 
@@ -39,89 +44,74 @@
 #pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
 // TODO: fix all chars to unsigned chars
 
+using namespace std;
 
+typedef unsigned char KEY_TYPE;
 
+class NODE {
+public:
+	static size_t total;
+	
+	NODE::NODE() {
+		word_ending = 0;
+		depth = 0;
+		id = total++;
+	}
 
-
-#define MAX_VAL SIZE_MAX
-#define MAX_NODES 100000
-#define NODE_ARRAY_SIZE 256
-#define NODE_ARRAY_OFFSET ' '	 //character 0 for in node array
-
-typedef struct NODE {
 	int word_ending;			// NOTE: type for bool values
 	int depth;
 	unsigned int id;			// offset in the node arrays
-	struct NODE** children;
-} NODE;
+	map<KEY_TYPE, NODE*> children;
+};
 
 
-typedef struct N_GRAM {
+class N_GRAM {
+public:
 	size_t start;
 	size_t end;
-} N_GRAM;
+};
 
 
-// Static for now. NOTE: need to test big sized arrays for static vs dynamic
-NODE* node_arrays[MAX_NODES][NODE_ARRAY_SIZE] = { };
+#define MAX_NODES 10000
+
 N_GRAM search_state[MAX_NODES];
-
 unsigned int results_list[MAX_NODES]; // max nodes
 size_t results_found = 0; // free spot 
+size_t NODE::total = 0; //used for node id
 
-size_t next_empty_array = 0; //used by get_new_node
-
-// only for debuging
-int nodes_freed = 0;
-int iterator_counter = 0;
-
-
-NODE* get_new_node() {
-	assert(next_empty_array < MAX_NODES);
-
-	NODE* node = (NODE *)malloc(sizeof(NODE));
-
-	node->word_ending = 0;
-	node->id = next_empty_array;
-
-	// TODO: next empty array Increment should be an atomic
-	node->children = node_arrays[next_empty_array++];
-	// TODO : benchmark with calloc
-	//node->children = (NODE **)calloc(NODE_ARRAY_SIZE, sizeof(NODE*));
-	return node;
-}
-
-
-void free_node(NODE* root) {
-	assert(root);
-	int i;
-	for (i = 0; i < NODE_ARRAY_SIZE; ++i) {
-		if (root->children[i]) {
-			free_node(root->children[i]);
-		}
+void free_node(NODE* current_node) {
+	assert(current_node);
+	map<KEY_TYPE, NODE*>::iterator it;
+	for (it = current_node->children.begin(); it != current_node->children.end(); ++it) {
+		free_node(it->second);
+		delete it->second;
 	}
-	free(root);
-	++nodes_freed;
 }
-
 
 void add_word(NODE* root, char* word_input) {
 	
 	NODE* current_node = root;
+	NODE* new_node;
+
 	char *word = word_input;
 
 	assert(root);
 	assert(word);
 
+	map<KEY_TYPE, NODE*>::iterator found;
+
 	while (*word != '\0') {
 		assert(*word >= NODE_ARRAY_OFFSET);
 
-		if (!current_node->children[*word]) {
-			current_node->children[*word] = get_new_node();
-			current_node->children[*word]->depth = current_node->depth + 1;
+		found = current_node->children.find((KEY_TYPE)*word);
+		if (found == current_node->children.end()) {
+			new_node = new NODE();
+			new_node->depth = current_node->depth + 1;
+			current_node = current_node->children[*word] = new_node;
 		}
-
-		current_node = current_node->children[*word];
+		else {
+			current_node = found->second;
+		}
 		++word;
 	}
 	assert(current_node);
@@ -174,7 +164,7 @@ void search_from(NODE* root, const char* search, const size_t start) {
 				// list will be used to find the results and zero the search_state table
 			}
 		}
-		current_node = current_node->children[*(unsigned char *)search];
+		current_node = current_node->children[(KEY_TYPE)*search];
 		++search;
 	}
 
@@ -196,18 +186,6 @@ int comparator(const N_GRAM* left, const N_GRAM* right) {
 		return (left->start > right->start) ? 1 : -1;
 	}
 	return (left->end > right->end) ? 1 : -1;
-}
-
-void swap(N_GRAM* left, N_GRAM* right) {
-	static N_GRAM temp;
-	temp.start = left->start;
-	temp.end = left->end;
-	
-	left->start = right->start;
-	left->end = right->end;
-
-	right->start = temp.start;
-	right->end = temp.end;
 }
 
 int search_implementation(NODE* root, const char* search) {
@@ -321,7 +299,7 @@ int search_implementation(NODE* root, const char* search) {
 
 int main() {
 
-	NODE *trie = get_new_node();
+	NODE *trie = new NODE();
 	trie->depth = 0;
 
 	//maybe larger for fiewer reallocations
