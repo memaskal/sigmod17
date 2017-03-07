@@ -72,7 +72,7 @@ public:
 };
 
 
-#define MAX_NODES 10000
+#define MAX_NODES 10000000
 
 N_GRAM search_state[MAX_NODES];
 unsigned int results_list[MAX_NODES]; // max nodes
@@ -124,18 +124,24 @@ void add_word(NODE* root, char* word_input) {
 int remove_word(NODE* root, char* word) {
 
 	NODE* current_node = root;
+	NODE* new_node;
 
 	assert(root);
 	assert(word);
 
-	while (*word != '\0' && current_node != NULL) {
-		if (current_node->children[*word] == NULL) {
+	map<KEY_TYPE, NODE*>::iterator found;
+
+	while (*word != '\0') {
+		assert(*word >= NODE_ARRAY_OFFSET);
+
+		found = current_node->children.find((KEY_TYPE)*word);
+		if (found == current_node->children.end()) {
 			return 0;
 		}
-		current_node = current_node->children[*word];
+		current_node = found->second;
 		++word;
 	}
-
+	assert(current_node);
 	current_node->word_ending = 0;
 	return 1;
 }
@@ -143,6 +149,7 @@ int remove_word(NODE* root, char* word) {
 void search_from(NODE* root, const char* search, const size_t start) {
 
 	NODE* current_node = root;
+	map<KEY_TYPE, NODE*>::iterator found;
 
 	assert(root);
 	assert(search);
@@ -164,7 +171,11 @@ void search_from(NODE* root, const char* search, const size_t start) {
 				// list will be used to find the results and zero the search_state table
 			}
 		}
-		current_node = current_node->children[(KEY_TYPE)*search];
+		found = current_node->children.find((KEY_TYPE)*search);
+		if (found == current_node->children.end()) {
+			return;
+		}
+		current_node = found->second;
 		++search;
 	}
 
@@ -258,6 +269,14 @@ int search_implementation(NODE* root, const char* search) {
 		results_list[j+1] = temp;
 	}
 #endif // PARALLEL_SORT
+
+	if (results_found == 0) {
+		printf("-1\n");
+		//	debug_print("\n");
+		fflush(stdout);
+		return 0;
+	}
+
 
 	for (i=0; i<results_found-1; ++i) {
 
