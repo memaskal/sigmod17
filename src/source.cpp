@@ -4,7 +4,7 @@
 #include <time.h>
 // NOTE: do we need type control?
 #include <stdint.h>
-
+#include <unistd.h>
 #include <list>
 #include <map>
 
@@ -14,12 +14,12 @@
 #endif
 
 // Debugging defines
-#define NDEBUG
+//#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 3
+#define NUM_THREADS 4
 #define PARALLEL_CHUNK_SIZE 750
 
 // define max value
@@ -44,35 +44,140 @@
 #pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
 // TODO: fix all chars to unsigned chars
 
-using namespace std;
 
 typedef unsigned char KEY_TYPE;
 
-class NODE {
-public:
+struct NODE {
+
 	static size_t total;
 	
 	NODE() {
 		word_ending = 0;
 		depth = 0;
 		id = total++;
+		ch_type = 0;
 	}
 
 	int word_ending;			// NOTE: type for bool values
 	int depth;
 	unsigned int id;			// offset in the node arrays
-	map<KEY_TYPE, NODE*> children;
+	int ch_type;	// 0 null,
+			// 1 NODE* Array[256]
+			// 2 map<KEY_TYPE, NODE*>
+	std::map<KEY_TYPE, NODE*> map_children;
+	NODE** ar_children;
 };
 
 
-class N_GRAM {
-public:
+struct N_GRAM {
 	size_t start;
 	size_t end;
 };
+#define MAX_NODES 	10000000
+#define ARRAY_NODES 	1500000
+
+#define ARRAY_MAX_DEPTH	15 // Depth bigger than this only gets maps
+
+#define MAX_USED_CHAR 256
+
+NODE*** node_child;
+size_t next_node_child = 0;
+size_t missed_arrays = 0;
+
+void init_arrays() {
+	size_t i;
+	size_t j;
+
+	#ifndef NDEBUG
+	for (i=0; i<4; ++i) {
+		debug_print("Allocating %zuGB in %zu\n", (size_t)ARRAY_NODES * 8 * 256 / 1000000000, 4-i);
+		sleep(1);
+	}
+	#endif
+
+	node_child = (NODE***) malloc(ARRAY_NODES * sizeof(NODE **));
+	for (i=0; i<ARRAY_NODES; ++i) {
+		node_child[i] = (NODE**) malloc(MAX_USED_CHAR*sizeof(NODE*));
+		for (j=0; j<MAX_USED_CHAR; ++j) {
+			node_child[i][j] = NULL;
+		}
+	}
+}
+
+void free_arrays() {
+	size_t i;
+
+	for (i=0; i<ARRAY_NODES; ++i) {
+		free(node_child[i]);
+	}
+	free(node_child);
+}
 
 
-#define MAX_NODES 10000000
+NODE* get_child(NODE* root, unsigned char c) {
+	if (!root->ch_type) {
+		return NULL;
+	}
+
+	if (root->ch_type == 1){
+		return root->ar_children[c];
+	}
+	std::map<KEY_TYPE, NODE*>::iterator it;
+	it = root->map_children.find(c);
+	return (it != root->map_children.end() ? it->second : NULL);
+
+}
+
+NODE* get_create_child(NODE* root, unsigned char c) {
+
+	if (root->ch_type == 0) {
+		// decide what type
+		if (root->depth > ARRAY_MAX_DEPTH) {
+			root->ch_type = 2;
+		}
+		else {
+			if (next_node_child < ARRAY_NODES) {
+				root->ch_type = 1;
+				root->ar_children = node_child[next_node_child++];
+			}
+			else {
+				root->ch_type = 2;
+				++missed_arrays;
+			}
+		}
+	}
+	
+	if (root->ch_type == 1) {
+		// its an array
+		NODE** temp = &(root->ar_children[c]);
+		if (*temp) {
+			return *temp;
+		}
+		else {
+			// create
+			*temp = new NODE();
+			(*temp)->depth = root->depth + 1;
+			return *temp;
+		}
+	}
+	else {
+		// its a map
+		NODE** temp = &(root->map_children[c]);
+		if (*temp) {
+			assert(*temp);
+			return *temp;
+		}
+		else {
+			// create
+			*temp = new NODE();
+			(*temp)->depth = root->depth + 1;
+			return *temp;
+		}
+	}
+}
+
+
+
 
 N_GRAM search_state[MAX_NODES];
 unsigned int results_list[MAX_NODES]; // max nodes
@@ -80,38 +185,31 @@ size_t results_found = 0; // free spot
 size_t NODE::total = 0; //used for node id
 
 void free_node(NODE* current_node) {
-	assert(current_node);
-	map<KEY_TYPE, NODE*>::iterator it;
-	for (it = current_node->children.begin(); it != current_node->children.end(); ++it) {
-		free_node(it->second);
-		delete it->second;
+	if (current_node) {
+		return;
 	}
+
+	size_t i;
+	NODE* temp;	
+
+	for(i=0; i<MAX_USED_CHAR; ++i) {
+		temp = get_create_child(current_node, i);
+		free_node(temp);
+	}
+	delete current_node;
 }
 
 void add_word(NODE* root, char* word_input) {
-	
 	NODE* current_node = root;
-	NODE* new_node;
 
 	char *word = word_input;
 
 	assert(root);
 	assert(word);
 
-	map<KEY_TYPE, NODE*>::iterator found;
-
 	while (*word != '\0') {
-		assert(*word >= NODE_ARRAY_OFFSET);
-
-		found = current_node->children.find((KEY_TYPE)*word);
-		if (found == current_node->children.end()) {
-			new_node = new NODE();
-			new_node->depth = current_node->depth + 1;
-			current_node = current_node->children[*word] = new_node;
-		}
-		else {
-			current_node = found->second;
-		}
+		current_node = get_create_child(current_node, *word);
+		assert(current_node);
 		++word;
 	}
 	assert(current_node);
@@ -128,16 +226,14 @@ int remove_word(NODE* root, char* word) {
 	assert(root);
 	assert(word);
 
-	map<KEY_TYPE, NODE*>::iterator found;
+	std::map<KEY_TYPE, NODE*>::iterator found;
 
 	while (*word != '\0') {
-		assert(*word >= NODE_ARRAY_OFFSET);
 
-		found = current_node->children.find((KEY_TYPE)*word);
-		if (found == current_node->children.end()) {
+		current_node = get_child(current_node, *word);
+		if (!current_node) {
 			return 0;
 		}
-		current_node = found->second;
 		++word;
 	}
 	assert(current_node);
@@ -148,7 +244,6 @@ int remove_word(NODE* root, char* word) {
 void search_from(NODE* root, const char* search, const size_t start) {
 
 	NODE* current_node = root;
-	map<KEY_TYPE, NODE*>::iterator found;
 
 	assert(root);
 	assert(search);
@@ -170,11 +265,11 @@ void search_from(NODE* root, const char* search, const size_t start) {
 				// list will be used to find the results and zero the search_state table
 			}
 		}
-		found = current_node->children.find((KEY_TYPE)*search);
-		if (found == current_node->children.end()) {
+
+		current_node = get_child(current_node, *search);
+		if (!current_node) {
 			return;
 		}
-		current_node = found->second;
 		++search;
 	}
 
@@ -250,10 +345,15 @@ int search_implementation(NODE* root, const char* search) {
 
 	} // end of pragma omp parallel
 	
+	if (results_found == 0) {
+		printf("-1\n");
+		//	debug_print("\n");
+		fflush(stdout);
+		return 0;
+	}
 
 	// Serial insertion sort
 #ifndef PARALLEL_SORT
-	assert(results_found > 0);
 	int j;
 	int temp;
 
@@ -269,12 +369,7 @@ int search_implementation(NODE* root, const char* search) {
 	}
 #endif // PARALLEL_SORT
 
-	if (results_found == 0) {
-		printf("-1\n");
-		//	debug_print("\n");
-		fflush(stdout);
-		return 0;
-	}
+
 
 
 	for (i=0; i<results_found-1; ++i) {
@@ -317,6 +412,8 @@ int search_implementation(NODE* root, const char* search) {
 
 int main() {
 
+	init_arrays();
+
 	NODE *trie = new NODE();
 	trie->depth = 0;
 
@@ -337,7 +434,7 @@ int main() {
 		add_word(trie, line);
 		words_added++;
 	}
-	debug_print("Words added: %zu. Total nodes in trie: %zu\n", words_added, next_empty_array);
+	debug_print("Words added: %zu\n", words_added); //. Total nodes in trie: %zu\n", words_added, next_empty_array);
 
 	size_t i;
 	for (i = 0; i < MAX_NODES; ++i) {
@@ -370,7 +467,7 @@ int main() {
 				input_len = getline(&line, &len, stdin);
 				line[input_len - 1] = '\0';
 				action_count++;
-
+				if (action_count % 10000 == 0) {debug_print("Action: %d\n", action_count);}
 				switch (action) {
 				case 'Q':
 					queries_count++;
@@ -389,11 +486,12 @@ int main() {
 			}
 		}
 	}
-	
+	debug_print("Arrays used: %zu\nArrays missed: %zu\n", next_node_child, missed_arrays);
 	free_node(trie);
-	debug_print("Nodes freed: %d\n", nodes_freed);
 	free(line);
+	free_arrays();
 
 	return 0;
 }
+
 
