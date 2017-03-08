@@ -19,8 +19,23 @@
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 4
-#define PARALLEL_CHUNK_SIZE 750
+#define NUM_THREADS 2		// Good value: CPU threads - 1 seems to be the fastest atm
+#define PARALLEL_CHUNK_SIZE 750 // Good value: 750 for large test case
+
+
+// ARRAY AND MEMORY CONFIGURATION
+#define ARRAY_NODES 	1000000 // The bigger the better probably
+				// Run atleast 1 time without NDEBUG if you make changes to this.
+
+#define ARRAY_MAX_DEPTH	10 // Depth bigger than this only gets maps
+			  // Use small value if ARRAY_NODES is small
+
+
+
+#define MAX_NODES 	10000000
+#define MAX_USED_CHAR   256
+
+
 
 // define max value
 #define MAX_VAL SIZE_MAX
@@ -73,12 +88,6 @@ struct N_GRAM {
 	size_t start;
 	size_t end;
 };
-#define MAX_NODES 	10000000
-#define ARRAY_NODES 	1500000
-
-#define ARRAY_MAX_DEPTH	15 // Depth bigger than this only gets maps
-
-#define MAX_USED_CHAR 256
 
 NODE*** node_child;
 size_t next_node_child = 0;

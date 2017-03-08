@@ -8,11 +8,11 @@ SOURCES=src/source.cpp
 EXECUTABLE=source.out
 	
 all:
-	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(NOMP) $(SOURCES) -o $(EXECUTABLE)
+	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(OMP) $(SOURCES) -o $(EXECUTABLE)
 dbg:
 	$(CC) $(CFLAGS) $(OMP) $(SOURCES) -o $(EXECUTABLE)
-omp:
-	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(OMP) $(SOURCES) -o $(EXECUTABLE)
+nomp:
+	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(NOMP) $(SOURCES) -o $(EXECUTABLE)
 noflags:
 	$(CC) $(SOURCES) -o $(EXECUTABLE)
 
