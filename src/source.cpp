@@ -15,7 +15,7 @@
 #endif
 
 // Debugging defines
-#define NDEBUG
+//#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
@@ -33,8 +33,8 @@
 
 
 
-#define MAX_NODES 	7400000
-#define MAX_USED_CHAR   240
+#define MAX_NODES 	7300000
+#define MAX_USED_CHAR   256
 
 
 
@@ -85,8 +85,13 @@ NODE* nodes;
 int next_node_child = 2;
 int missed_arrays = 0;
 
+N_GRAM search_state[MAX_NODES];
+unsigned int results_list[MAX_NODES]; // max nodes
+size_t results_found = 0; // free spot 
+
+
 void init_node(NODE* node) {
-	int i;	
+	int i;
 	node->word_ending = 0;
 	for (i=0; i<MAX_USED_CHAR; ++i) {
 		node->ar_children[i] = 0;
@@ -109,22 +114,7 @@ void init_arrays() {
 	for (i=0; i<MAX_NODES; ++i) {
 		init_node(&nodes[i]);
 	}
-	#ifndef NDEBUG
-	debug_print("Waiting 1 second for good measure\n");
-	sleep(1);
-	#endif
 }
-
-void free_arrays() {
-/*	size_t i;
-
-	for (i=0; i<MAX_NODES; ++i) {
-		free(node_child[i]);
-	}
-	free(node_child);
-*/
-}
-
 
 unsigned int get_child(NODE* root, unsigned char c) {
 	return root->ar_children[c];
@@ -135,31 +125,6 @@ unsigned int get_create_child(NODE* root, unsigned char c) {
 		root->ar_children[c] = next_node_child++;
 	}
 	return root->ar_children[c];
-}
-
-
-
-
-N_GRAM search_state[MAX_NODES];
-unsigned int results_list[MAX_NODES]; // max nodes
-size_t results_found = 0; // free spot 
-
-void free_node(NODE* current_node) {
-	current_node++;
-//	assert(current_node);
-/*	if (current_node) {
-		return;
-	}
-
-	size_t i;
-	NODE* temp;	
-
-	for(i=0; i<MAX_USED_CHAR; ++i) {
-		temp = get_create_child(current_node, i);
-		free_node(temp);
-	}
-	delete current_node;
-*/
 }
 
 void add_word(char* substr) {
@@ -261,15 +226,14 @@ int search_implementation(const char* search) {
 	#pragma omp parallel shared(search) private(i) num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
-		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE) nowait
+		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE)
 		for (i=1; i<search_len; ++i) {
 			if (search[i] == ' ') {
 				search_from(search + i + 1, i + 1);
 			}
 		}
 
-		// wait for all the tasks to finish
-		#pragma omp barrier
+
 		#ifdef PARALLEL_SORT
 		int threads = omp_get_num_threads();
 		int id = omp_get_thread_num();
@@ -381,7 +345,7 @@ int main() {
 		add_word(line);
 		++words_added;
 	}
-	debug_print("TOTAL: Words added: %zu\n", words_added); //. Total nodes in trie: %zu\n", words_added, next_empty_array);
+	debug_print("TOTAL: Words added: %zu\n", words_added); 
 
 	size_t i;
 	for (i = 0; i < MAX_NODES; ++i) {
@@ -393,7 +357,10 @@ int main() {
 	int action_count = 0;
 	int queries_count = 0;
 
-
+	// Wait 2 seconds before printing R
+	debug_print("Waiting 2 seconds for swap\n");
+	sleep(2);
+	debug_print("Finished sleeping.\n");
 	// totaly ready to start
 	printf("R\n");
 	// TODO: find faster way to force fflush
@@ -408,6 +375,8 @@ int main() {
 		// Read the rest of input
 		input_len = getline(&line, &len, stdin);
 		line[input_len - 1] = '\0';
+		//action = line[0];
+		
 		action_count++;
 		switch (action) {
 		case 'Q':
@@ -427,10 +396,9 @@ int main() {
 	}
 
 	debug_print("Arrays used: %d\nArrays missed: %d\n", next_node_child, missed_arrays);
-//	free_node(trie);
-	free(line);
-	free_arrays();
 
+	free(nodes);
+	free(line);
 	return 0;
 }
 
