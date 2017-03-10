@@ -1,13 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-// NOTE: do we need type control?
 #include <limits.h>
-#include <stdint.h>
 #include <unistd.h>
-#include <list>
-#include <map>
 
 
 #ifdef _OPENMP
@@ -15,13 +10,13 @@
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 4		// Good value: CPU threads - 1 seems to be the fastest atm
-#define PARALLEL_CHUNK_SIZE 750 // Good value: 750 for large test case
+#define NUM_THREADS 8		
+#define PARALLEL_CHUNK_SIZE 768 
 
 
 // ARRAY AND MEMORY CONFIGURATION
@@ -57,19 +52,11 @@
 #endif // NDEBUG
 
 
-#pragma GCC diagnostic ignored "-Wchar-subscripts" 	// !! DANGEROUS !!
-// TODO: fix all chars to unsigned chars
+#pragma GCC diagnostic ignored "-Wchar-subscripts" // TODO: fix all chars to unsigned chars. Need to make getline accept unsigned char
 
-
-// typedef unsigned char KEY_TYPE;
 
 struct NODE {
-
 	char word_ending;			// NOTE: type for bool values
-	//unsigned int id;			// offset in the node arrays
-	//int ch_type;	// 0 null,
-			// 1 NODE* Array[256]
-			// 2 map<KEY_TYPE, NODE*>
 	unsigned int ar_children[MAX_USED_CHAR];
 };
 
@@ -81,7 +68,6 @@ struct N_GRAM {
 
 NODE* nodes;
 
-//NODE*** node_child;
 int next_node_child = 2;
 int missed_arrays = 0;
 
@@ -182,9 +168,6 @@ void search_from(const char* search, const size_t start) {
 		}
 
 		node_index = get_child(&nodes[node_index], *search);
-		if (node_index == 0) {
-			return;
-		}
 		++search;
 	}
 
@@ -234,29 +217,6 @@ int search_implementation(const char* search) {
 		}
 
 
-		#ifdef PARALLEL_SORT
-		int threads = omp_get_num_threads();
-		int id = omp_get_thread_num();
-		size_t start_pos; 
-  
-
-   
-		for (i = 0; i < results_found; ++i) {
-			start_pos = id * 2 + (i % 2);
-   
-			while (start_pos < results_found - 1) {
-				if (comparator(&search_state[results_list[start_pos]], &search_state[results_list[start_pos + 1]]) > 0) {
-					//swap results
-					unsigned int temp_id = results_list[start_pos];
-					results_list[start_pos] = results_list[start_pos + 1];
-					results_list[start_pos + 1] = temp_id;   
-				} 
-				start_pos += threads * 2;
-			}
-			#pragma omp barrier  
-		}
-		#endif // PARALLEL_SORT
-
 	} // end of pragma omp parallel
 	
 	if (results_found == 0) {
@@ -267,7 +227,6 @@ int search_implementation(const char* search) {
 	}
 
 	// Serial insertion sort
-#ifndef PARALLEL_SORT
 	int j;
 	int temp;
 
@@ -281,8 +240,6 @@ int search_implementation(const char* search) {
 		}
 		results_list[j+1] = temp;
 	}
-#endif // PARALLEL_SORT
-
 
 
 
@@ -347,6 +304,11 @@ int main() {
 	}
 	debug_print("TOTAL: Words added: %zu\n", words_added); 
 
+	// Wait 2 seconds before printing R
+	debug_print("Waiting 3 seconds for swap\n");
+	sleep(3);
+	debug_print("Finished sleeping.\n");
+
 	size_t i;
 	for (i = 0; i < MAX_NODES; ++i) {
 		search_state[i].start = MAX_VAL;
@@ -357,10 +319,6 @@ int main() {
 	int action_count = 0;
 	int queries_count = 0;
 
-	// Wait 2 seconds before printing R
-	debug_print("Waiting 2 seconds for swap\n");
-	sleep(2);
-	debug_print("Finished sleeping.\n");
 	// totaly ready to start
 	printf("R\n");
 	// TODO: find faster way to force fflush
