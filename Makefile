@@ -1,4 +1,4 @@
-CC=g++
+CC=gcc
 CFLAGS=-Wall -Wextra -Wchar-subscripts -Werror
 OMP=-fopenmp
 NOMP=-Wno-unknown-pragmas
