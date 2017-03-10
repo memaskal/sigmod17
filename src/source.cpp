@@ -10,12 +10,12 @@
 #endif
 
 // Debugging defines
-#define NDEBUG
+//#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 8		
+#define NUM_THREADS 4		
 #define PARALLEL_CHUNK_SIZE 768 
 
 
@@ -28,7 +28,7 @@
 
 
 
-#define MAX_NODES 	7300000
+#define MAX_NODES 	1000000
 #define MAX_USED_CHAR   256
 
 
@@ -38,8 +38,10 @@
 
 #ifndef NDEBUG
 #define debug_print(...)  do{ fprintf(stderr, __VA_ARGS__); }while(0)
+#define debug_only(...) do{ __VA_ARGS__; }while(0)
 #else
 #define debug_print(...)  do{ }while(0)
+#define debug_only(...) do{ }while(0)
 	#ifdef _MSC_VER /* VS PORTABILITY. */
 	/*#define getline vs_getline
 
@@ -75,6 +77,14 @@ N_GRAM search_state[MAX_NODES];
 unsigned int results_list[MAX_NODES]; // max nodes
 size_t results_found = 0; // free spot 
 
+int total_len_add = 0;
+int total_len_delete = 0;
+int total_len_query = 0;
+int total_add = 0;
+int total_delete = 0;
+int total_query = 0;
+int total_search = 0;
+int total_results = 0;
 
 void init_node(NODE* node) {
 	int i;
@@ -96,7 +106,7 @@ void init_arrays() {
 
 
 	nodes = (NODE*) malloc(MAX_NODES*sizeof(NODE));
-
+	assert(nodes);
 	for (i=0; i<MAX_NODES; ++i) {
 		init_node(&nodes[i]);
 	}
@@ -120,6 +130,7 @@ void add_word(char* substr) {
 	while (*substr != '\0') {
 		node_index = get_create_child(&nodes[node_index], *substr);
 		++substr;
+		debug_only(total_len_add++);
 	}
 
 	nodes[node_index].word_ending = 1;
@@ -138,6 +149,7 @@ void remove_word(char* substr) {
 			return;
 		}
 		++substr;
+		debug_only(total_len_delete++);
 	}
 
 	nodes[node_index].word_ending = 0;
@@ -148,6 +160,7 @@ void search_from(const char* search, const size_t start) {
 	unsigned int node_index = 1;
 
 	assert(search);
+	debug_only(total_search++);
 
 	const char *str_start = search;
 
@@ -205,7 +218,7 @@ int search_implementation(const char* search) {
 	search_from(search, 0);
 	n_start = search;
 	size_t search_len = strlen(search);
-
+	debug_only(total_len_query+=search_len);
 	#pragma omp parallel shared(search) private(i) num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
@@ -222,6 +235,7 @@ int search_implementation(const char* search) {
 	if (results_found == 0) {
 		printf("-1\n");
 		//	debug_print("\n");
+		debug_print("Results found: %zu\n", results_found);
 		fflush(stdout);
 		return 0;
 	}
@@ -242,7 +256,6 @@ int search_implementation(const char* search) {
 	}
 
 
-
 	for (i=0; i<results_found-1; ++i) {
 
 		found = search_state[results_list[i]];
@@ -255,6 +268,7 @@ int search_implementation(const char* search) {
 		for (; n_start < n_end; ++n_start) {
 			printf("%c", *n_start);
 //			debug_print("%c", *n_start);
+
 		}
 		printf("|");
 //		debug_print("|");
@@ -271,11 +285,11 @@ int search_implementation(const char* search) {
 		printf("%c", *n_start);
 //		debug_print("%c", *n_start);
 	}
-
+	debug_print("Results found: %zu\n", results_found);
 	printf("\n");
 //	debug_print("\n");
 	fflush(stdout);
-	
+	debug_only(total_results+=results_found);
 	return 0;
 }
 
@@ -334,17 +348,20 @@ int main() {
 		input_len = getline(&line, &len, stdin);
 		line[input_len - 1] = '\0';
 		//action = line[0];
-		
+		//if (action_count % 10 == 0) debug_print("Actions: %d\n", action_count);
 		action_count++;
 		switch (action) {
 		case 'Q':
+			debug_only(total_query++);
 			queries_count++;
 			search_implementation(line);
 			break;
 		case 'A':
+			debug_only(total_add++);
 			add_word(line);
 			break;
 		case 'D':
+			debug_only(total_delete++);
 			remove_word(line);
 			break;
 		case 'F':
@@ -354,6 +371,8 @@ int main() {
 	}
 
 	debug_print("Arrays used: %d\nArrays missed: %d\n", next_node_child, missed_arrays);
+	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
+			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
 
 	free(nodes);
 	free(line);
