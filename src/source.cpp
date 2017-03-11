@@ -10,7 +10,7 @@
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
@@ -29,7 +29,7 @@
 
 
 #define MAX_NODES 	7250000
-#define MAX_USED_CHAR   230
+#define MAX_USED_CHAR   240
 
 
 
@@ -77,6 +77,9 @@ N_GRAM search_state[MAX_NODES];
 unsigned int results_list[MAX_NODES]; // max nodes
 size_t results_found = 0; // free spot 
 
+
+
+#ifndef NDEBUG
 int total_len_add = 0;
 int total_len_delete = 0;
 int total_len_query = 0;
@@ -85,6 +88,24 @@ int total_delete = 0;
 int total_query = 0;
 int total_search = 0;
 int total_results = 0;
+
+size_t chars127 = 0;
+size_t chars1 = 0;
+size_t chars2 = 0;
+size_t chars3 = 0;
+size_t chars4 = 0;
+size_t chars5 = 0;
+size_t charsWrong = 0;
+void count_char(unsigned char c) {
+		if (c<=127) chars127++;
+		else if ((c & 0xE0) == 0xC0) chars1++;
+        else if ((c & 0xF0) == 0xE0) chars2++;
+        else if ((c & 0xF8) == 0xF0) chars3++;
+        else if ((c & 0xFC) == 0xF8) chars4++;
+        else if ((c & 0xFE) == 0xFC) chars5++;
+        else charsWrong++;
+}
+#endif
 
 void init_node(NODE* node) {
 	int i;
@@ -333,16 +354,15 @@ int main() {
 		//action = line[0];
 		//if (action_count % 10 == 0) debug_print("Actions: %d\n", action_count);
 		action_count++;
-		/*
+		
+		#ifndef NDEBUG
 		unsigned int k;
 		for (k=0; k<strlen(line); ++k) {
-			if ((unsigned char)line[k] == 206) {
-				counter++;
-				debug_print("LINE %d: %s\n\n\n\n", counter, line);
-				break;
-			}
+			count_char(line[k]);
 		}
-		*/
+		#endif
+		
+		
 		switch (action) {
 		case 'Q':
 			debug_only(total_query++);
@@ -366,7 +386,8 @@ int main() {
 	debug_print("Arrays used: %d\nArrays missed: %d\n", next_node_child, missed_arrays);
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
-
+	debug_print("Chars127: %zu\nChars1: %zu\nChars2: %zu\nChars3: %zu\nChars4: %zu\nChars5: %zu\nCharsWrong: %zu\n", chars127, chars1, chars2, chars3, chars4, chars5, charsWrong);
+	
 	free(nodes);
 	free(line);
 	return 0;
