@@ -21,15 +21,20 @@
 
 // ARRAY AND MEMORY CONFIGURATION
 //#define ARRAY_NODES 	1500000 // The bigger the better probably
-				// Run atleast 1 time without NDEBUG if you make changes to this.
+// Run atleast 1 time without NDEBUG if you make changes to this.
 
 //#define ARRAY_MAX_DEPTH	15 // Depth bigger than this only gets maps
-			  // Use small value if ARRAY_NODES is small
+// Use small value if ARRAY_NODES is small
 
 
+<<<<<<< HEAD
 
 #define MAX_NODES 		400000
 #define MAX_USED_CHAR   256
+=======
+#define MAX_NODES	100000
+#define MAX_USED_CHAR	230
+>>>>>>> d9ed2a1bb6eb93f8a6b331946b18f3a5c940d739
 
 
 
@@ -70,13 +75,12 @@ struct N_GRAM {
 
 NODE* nodes;
 
-int next_node_child = 2;
+int next_node_child = 2; // always start from possition 2
 int missed_arrays = 0;
 
 N_GRAM search_state[MAX_NODES];
 unsigned int results_list[MAX_NODES]; // max nodes
 size_t results_found = 0; // free spot 
-
 
 
 #ifndef NDEBUG
@@ -90,19 +94,25 @@ int total_search = 0;
 int total_results = 0;
 #endif
 
-void init_node(NODE* node) {
-	int i;
-	node->word_ending = 0;
-	for (i=0; i<MAX_USED_CHAR; ++i) {
-		node->ar_children[i] = 0;
+
+inline void init_node(NODE* node) {
+	
+	unsigned int i;
+	unsigned int *children = node->ar_children;
+	
+	for (i = 0; i < MAX_USED_CHAR; ++i) {
+		children[i] = 0;
 	}
+	node->word_ending = 0;
 }
 
+
 void init_arrays() {
-	int i;
+	
+	unsigned int i;
 
 	#ifndef NDEBUG
-	for (i=0; i<4; ++i) {
+	for (i = 0; i < 4; ++i) {
 		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_NODES * sizeof(NODE) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
 		sleep(1);
 	}
@@ -111,23 +121,31 @@ void init_arrays() {
 
 	nodes = (NODE*) malloc(MAX_NODES*sizeof(NODE));
 	assert(nodes);
-	for (i=0; i<MAX_NODES; ++i) {
+	
+	for (i = 0; i < MAX_NODES; ++i) {
 		init_node(&nodes[i]);
 	}
 }
 
-unsigned int get_child(NODE* root, unsigned char c) {
+
+inline unsigned int get_child(NODE* root, unsigned char c) {
 	return root->ar_children[c];
 }
 
-unsigned int get_create_child(NODE* root, unsigned char c) {
-	if (root->ar_children[c] == 0) {
-		root->ar_children[c] = next_node_child++;
+
+inline unsigned int get_create_child(NODE* root, unsigned char c) {
+
+	unsigned int *child = &root->ar_children[c];
+	
+	if (*child == 0) {
+		*child = next_node_child++;
 	}
-	return root->ar_children[c];
+	return *child;
 }
 
-void add_word(char* substr) {
+
+void add_word(const char* substr) {
+
 	unsigned int node_index = 1;
 	assert(substr);
 
@@ -143,7 +161,8 @@ void add_word(char* substr) {
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
-void remove_word(char* substr) {
+void remove_word(const char* substr) {
+
 	unsigned int node_index = 1;
 	assert(substr);
 
@@ -158,6 +177,7 @@ void remove_word(char* substr) {
 
 	nodes[node_index].word_ending = 0;
 }
+
 
 void search_from(const char* search, const size_t start) {
 
@@ -201,14 +221,16 @@ void search_from(const char* search, const size_t start) {
 	}
 }
 
-int comparator(const N_GRAM* left, const N_GRAM* right) {
+
+inline int comparator(const N_GRAM* left, const N_GRAM* right) {
 	if (left->start != right->start) {
 		return (left->start > right->start) ? 1 : -1;
 	}
 	return (left->end > right->end) ? 1 : -1;
 }
 
-int search_implementation(const char* search) {
+
+int search_implementation(const char* search, const size_t search_len) {
 
 	// This should only be run by master thread
 	size_t i;
@@ -217,25 +239,22 @@ int search_implementation(const char* search) {
 	results_found = 0;
 	
 	search_from(search, 0);
-	size_t search_len = strlen(search);
 	debug_only(total_len_query+=search_len);
-	#pragma omp parallel shared(search) private(i) num_threads(NUM_THREADS)
+	
+	#pragma omp parallel num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
 		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE)
-		for (i=1; i<search_len; ++i) {
+		for (i = 1; i < search_len; ++i) {
 			if (search[i] == ' ') {
 				search_from(search + i + 1, i + 1);
 			}
 		}
-
-
 	} // end of pragma omp parallel
 
 	if (results_found == 0) {
 		printf("-1\n");
 		//	debug_print("\n");
-		fflush(stdout);
 		return 0;
 	}
 
@@ -243,9 +262,9 @@ int search_implementation(const char* search) {
 	int j;
 	int temp;
 
-	for (i=1; i<results_found; ++i) {
-		temp = results_list[i];
+	for (i = 1; i < results_found; ++i) {
 		j = i - 1;
+		temp = results_list[i];
 		while (j>=0 && comparator(&search_state[temp], &search_state[results_list[j]])<0) {
 
 			results_list[j+1] = results_list[j];
@@ -275,8 +294,6 @@ int search_implementation(const char* search) {
     found->start = MAX_VAL;
 
     printf("\n");
-    fflush(stdout);
-
 	debug_only(total_results+=results_found);
 	return 0;
 }
@@ -288,7 +305,7 @@ int main() {
 	init_arrays();
 
 	//maybe larger for fiewer reallocations
-	size_t len = 300000;
+	size_t len = 30000;
 	char *line = (char*)malloc(len * sizeof(char));
 	assert(line);
 
@@ -317,7 +334,6 @@ int main() {
 	}
 
 	char action;
-	int terminate = 0;
 	int action_count = 0;
 	int queries_count = 0;
 
@@ -325,19 +341,20 @@ int main() {
 	printf("R\n");
 	// TODO: find faster way to force fflush
 	fflush(stdout);
-	while (!terminate) {
-		action = getchar();
-		if (action == EOF) {
+	
+	while (1) {
+	
+		if ((action = getchar()) == EOF) {
 			break;
 		}
 		else if (action == 'F') {
+			fflush(stdout);
 			getchar();
 			continue;
 		}
-		else{
-			getchar();
-		}
+		
 		// read junk space
+		getchar();
 
 		// TDDO: implement fast input
 		// Read the rest of input
@@ -351,7 +368,7 @@ int main() {
 		case 'Q':
 			debug_only(total_query++);
 			queries_count++;
-			search_implementation(line);
+			search_implementation(line, input_len - 1);
 			break;
 		case 'A':
 			debug_only(total_add++);
@@ -360,10 +377,6 @@ int main() {
 		case 'D':
 			debug_only(total_delete++);
 			remove_word(line);
-			break;
-		case 'F':
-			//fflush(stdout);
-			//terminate = 1;
 			break;
 		}
 	}
