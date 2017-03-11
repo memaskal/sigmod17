@@ -27,14 +27,9 @@
 // Use small value if ARRAY_NODES is small
 
 
-<<<<<<< HEAD
-
-#define MAX_NODES 		400000
+#define MAX_NODES	400000
 #define MAX_USED_CHAR   256
-=======
-#define MAX_NODES	100000
-#define MAX_USED_CHAR	230
->>>>>>> d9ed2a1bb6eb93f8a6b331946b18f3a5c940d739
+
 
 
 
@@ -75,7 +70,7 @@ struct N_GRAM {
 
 NODE* nodes;
 
-int next_node_child = 2; // always start from possition 2
+int next_node_child = 2; // always start from position 2
 int missed_arrays = 0;
 
 N_GRAM search_state[MAX_NODES];
@@ -96,10 +91,10 @@ int total_results = 0;
 
 
 inline void init_node(NODE* node) {
-	
+
 	unsigned int i;
 	unsigned int *children = node->ar_children;
-	
+
 	for (i = 0; i < MAX_USED_CHAR; ++i) {
 		children[i] = 0;
 	}
@@ -108,7 +103,7 @@ inline void init_node(NODE* node) {
 
 
 void init_arrays() {
-	
+
 	unsigned int i;
 
 	#ifndef NDEBUG
@@ -121,7 +116,7 @@ void init_arrays() {
 
 	nodes = (NODE*) malloc(MAX_NODES*sizeof(NODE));
 	assert(nodes);
-	
+
 	for (i = 0; i < MAX_NODES; ++i) {
 		init_node(&nodes[i]);
 	}
@@ -136,7 +131,7 @@ inline unsigned int get_child(NODE* root, unsigned char c) {
 inline unsigned int get_create_child(NODE* root, unsigned char c) {
 
 	unsigned int *child = &root->ar_children[c];
-	
+
 	if (*child == 0) {
 		*child = next_node_child++;
 	}
@@ -237,10 +232,10 @@ int search_implementation(const char* search, const size_t search_len) {
 
 	// set to zero for the new search
 	results_found = 0;
-	
+
 	search_from(search, 0);
 	debug_only(total_len_query+=search_len);
-	
+
 	#pragma omp parallel num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
@@ -341,9 +336,9 @@ int main() {
 	printf("R\n");
 	// TODO: find faster way to force fflush
 	fflush(stdout);
-	
+
 	while (1) {
-	
+
 		if ((action = getchar()) == EOF) {
 			break;
 		}
@@ -352,7 +347,7 @@ int main() {
 			getchar();
 			continue;
 		}
-		
+
 		// read junk space
 		getchar();
 
