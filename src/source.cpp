@@ -28,8 +28,8 @@
 
 
 
-#define MAX_NODES 	1000000
-#define MAX_USED_CHAR   256
+#define MAX_NODES 	7250000
+#define MAX_USED_CHAR   230
 
 
 
@@ -208,15 +208,11 @@ int search_implementation(const char* search) {
 
 	// This should only be run by master thread
 	size_t i;
-	N_GRAM found;
-	const char* n_start;
-	const char* n_end;
 
 	// set to zero for the new search
 	results_found = 0;
 	
 	search_from(search, 0);
-	n_start = search;
 	size_t search_len = strlen(search);
 	debug_only(total_len_query+=search_len);
 	#pragma omp parallel shared(search) private(i) num_threads(NUM_THREADS)
@@ -235,7 +231,6 @@ int search_implementation(const char* search) {
 	if (results_found == 0) {
 		printf("-1\n");
 		//	debug_print("\n");
-		debug_print("Results found: %zu\n", results_found);
 		fflush(stdout);
 		return 0;
 	}
@@ -256,39 +251,28 @@ int search_implementation(const char* search) {
 	}
 
 
-	for (i=0; i<results_found-1; ++i) {
+	N_GRAM *found;
 
-		found = search_state[results_list[i]];
-		// zero it for the next search
-		search_state[results_list[i]].start = MAX_VAL;
+    for (i = 0; i < results_found - 1; ++i) {
 
-		n_start = (search + found.start);
-		n_end = (n_start + found.end);
+        found = &search_state[results_list[i]];
+        fwrite(&search[found->start], 1, found->end, stdout);
 
-		for (; n_start < n_end; ++n_start) {
-			printf("%c", *n_start);
-//			debug_print("%c", *n_start);
+        // zero it for the next search
+        found->start = MAX_VAL;
 
-		}
-		printf("|");
-//		debug_print("|");
-	}
+        printf("|");
+    }
 
+    found = &search_state[results_list[i]];
+    fwrite(&search[found->start], 1, found->end, stdout);
 
-	found = search_state[results_list[i]];
-	search_state[results_list[i]].start = MAX_VAL;
+    // zero it for the next search
+    found->start = MAX_VAL;
 
-	n_start = (search + found.start);
-	n_end = (n_start + found.end);
-
-	for (; n_start < n_end; ++n_start) {
-		printf("%c", *n_start);
-//		debug_print("%c", *n_start);
-	}
-	debug_print("Results found: %zu\n", results_found);
-	printf("\n");
-//	debug_print("\n");
-	fflush(stdout);
+    printf("\n");
+    fflush(stdout);
+	
 	debug_only(total_results+=results_found);
 	return 0;
 }
@@ -337,7 +321,6 @@ int main() {
 	printf("R\n");
 	// TODO: find faster way to force fflush
 	fflush(stdout);
-
 	while (!terminate) {
 		action = getchar();
 		// read junk space
@@ -350,6 +333,16 @@ int main() {
 		//action = line[0];
 		//if (action_count % 10 == 0) debug_print("Actions: %d\n", action_count);
 		action_count++;
+		/*
+		unsigned int k;
+		for (k=0; k<strlen(line); ++k) {
+			if ((unsigned char)line[k] == 206) {
+				counter++;
+				debug_print("LINE %d: %s\n\n\n\n", counter, line);
+				break;
+			}
+		}
+		*/
 		switch (action) {
 		case 'Q':
 			debug_only(total_query++);
