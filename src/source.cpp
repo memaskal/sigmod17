@@ -10,13 +10,13 @@
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
 #define NUM_THREADS 4
-#define PARALLEL_CHUNK_SIZE 384
+#define PARALLEL_CHUNK_SIZE 768
 
 
 // ARRAY AND MEMORY CONFIGURATION
@@ -28,8 +28,8 @@
 
 
 
-#define MAX_NODES 		7300000
-#define MAX_USED_CHAR   230
+#define MAX_NODES 		400000
+#define MAX_USED_CHAR   256
 
 
 

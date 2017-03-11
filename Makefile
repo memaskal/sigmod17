@@ -6,7 +6,7 @@ OPTIM_FLAGS=-O3
 
 SOURCES=src/source.cpp
 EXECUTABLE=source.out
-	
+
 all:
 	$(CC) $(CFLAGS) $(OPTIM_FLAGS) $(OMP) $(SOURCES) -o $(EXECUTABLE)
 dbg:
