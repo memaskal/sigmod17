@@ -10,7 +10,7 @@
 #endif
 
 // Debugging defines
-#define NDEBUG
+//#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
@@ -27,10 +27,11 @@
 // Use small value if ARRAY_NODES is small
 
 
-#define MAX_NODES			400000
-#define MAX_USED_CHAR   	256
-#define MAX_ARRAY_NODES 	100000
+#define MAX_NODES			10000000
+#define MAX_USED_CHAR   	220
+#define MAX_ARRAY_NODES 	7000000
 
+#define MAX_MAP_NODES (MAX_NODES - MAX_ARRAY_NODES)
 
 
 // define max value
@@ -70,6 +71,7 @@ struct N_GRAM {
 };
 
 NODE_AR* nodes_ar;
+NODE_MAP* nodes_map;
 
 int next_node_child = 2; // always start from position 2
 int missed_arrays = 0;
@@ -102,14 +104,20 @@ inline void init_node_ar(NODE_AR* node) {
 	node->word_ending = 0;
 }
 
+inline void init_node_map(NODE_MAP* node) {
+	node->word_ending = 0;
+	node->map_children = std::map<unsigned char, unsigned int>();
+}
+
 
 void init_arrays() {
+	debug_print("Sizeof NODE_AR: %zu - Sizeof NODE_MAP: %zu\n", sizeof(NODE_AR), sizeof(NODE_MAP));
 
 	unsigned int i;
 
 	#ifndef NDEBUG
 	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_ARRAY_NODES * sizeof(NODE) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
+		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
 		sleep(1);
 	}
 	#endif
@@ -121,29 +129,67 @@ void init_arrays() {
 	for (i = 0; i < MAX_ARRAY_NODES; ++i) {
 		init_node_ar(&nodes_ar[i]);
 	}
-}
-
-inline char get_ending(unsigned int index) {
-	return nodes_ar[index].word_ending;
-}
-
-inline void set_ending(unsigned int index, char is_ending) {
-	nodes_ar[index].word_ending = is_ending;
-}
-
-inline unsigned int get_child(unsigned int index, unsigned char c) {
-	return nodes_ar[index].ar_children[c];
-}
 
 
-inline unsigned int get_create_child(unsigned int index, unsigned char c) {
-
-	unsigned int *child = &nodes_ar[index].ar_children[c];
-
-	if (*child == 0) {
-		*child = next_node_child++;
+	// init NODE_MAP
+	nodes_map = (NODE_MAP*) malloc(MAX_MAP_NODES * sizeof(NODE_MAP));
+	for (i = 0; i < MAX_MAP_NODES; ++i) {
+		init_node_map(&nodes_map[i]);
 	}
-	return *child;
+}
+
+char get_ending(unsigned int index) {
+	if (index < MAX_ARRAY_NODES) {
+		return nodes_ar[index].word_ending;
+	}
+	// TODO: fix optimisation
+	index -= MAX_ARRAY_NODES;
+	return nodes_map[index].word_ending;
+}
+
+void set_ending(unsigned int index, char is_ending) {
+	if (index < MAX_ARRAY_NODES) {
+		nodes_ar[index].word_ending = is_ending;
+		return;
+	}
+	// TODO: fix optimisation
+	index -= MAX_ARRAY_NODES;
+
+	nodes_map[index].word_ending = is_ending;
+}
+
+unsigned int get_child(unsigned int index, unsigned char c) {
+	if (index < MAX_ARRAY_NODES) {
+		return nodes_ar[index].ar_children[c];
+	}
+	// TODO: fix optimisation
+	index -= MAX_ARRAY_NODES;
+	std::map<unsigned char, unsigned int>::iterator it = nodes_map[index].map_children.find(c);
+	if (it != nodes_map[index].map_children.end()) {
+		return it->second;
+	}
+	return 0;
+}
+
+// TODO: rewrite
+unsigned int get_create_child(unsigned int index, unsigned char c) {
+	unsigned int child = get_child(index, c);
+	if ( child!= 0) {
+		return child;
+	}
+
+	// Create child
+
+	if (index < MAX_ARRAY_NODES) {
+		// Parent is array
+		nodes_ar[index].ar_children[c] = next_node_child;
+		return next_node_child++;
+	}
+	
+	//Parent is map
+	index -= MAX_ARRAY_NODES;
+	nodes_map[index].map_children.insert(std::pair<unsigned char,unsigned int>(c, next_node_child));
+	return next_node_child++;
 }
 
 
@@ -385,7 +431,7 @@ int main() {
 		}
 	}
 
-	debug_print("Arrays used: %d\nArrays missed: %d\n", next_node_child, missed_arrays);
+	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
 

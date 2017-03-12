@@ -1,5 +1,5 @@
-CC=gcc
-CFLAGS=-Wall -Wextra -Wchar-subscripts -Werror
+CC=g++
+CFLAGS=-Wall -Wextra -Wchar-subscripts -Werror -std=c++11
 OMP=-fopenmp
 NOMP=-Wno-unknown-pragmas
 OPTIM_FLAGS=-O3
