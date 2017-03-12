@@ -23,7 +23,7 @@ else # Forward $1 to harness
 		cd ../submission-tools/
 		./create_tar.sh
 	else
-		echo "Invalid option or missing files. Valid options are -v, -l, -prepare"
+		echo "Invalid option or missing files. Valid options are -v, -l, -prepare, -tar"
 	fi
 fi
 

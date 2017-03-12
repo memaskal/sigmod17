@@ -27,9 +27,12 @@
 // Use small value if ARRAY_NODES is small
 
 
-#define MAX_NODES			10000000
-#define MAX_USED_CHAR   	220
-#define MAX_ARRAY_NODES 	7000000
+
+#define MAX_NODES			150000000
+#define MAX_USED_CHAR   	256
+#define MAX_ARRAY_NODES 	50000000
+
+
 
 #define MAX_MAP_NODES (MAX_NODES - MAX_ARRAY_NODES)
 
@@ -117,7 +120,7 @@ void init_arrays() {
 
 	#ifndef NDEBUG
 	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
+		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
 		sleep(1);
 	}
 	#endif
@@ -188,6 +191,14 @@ unsigned int get_create_child(unsigned int index, unsigned char c) {
 	
 	//Parent is map
 	index -= MAX_ARRAY_NODES;
+	#ifndef NDEBUG
+	if (index >= MAX_MAP_NODES) { 
+		debug_print("Error. Max nodes are not enough!\n"); 
+		printf("\n"); // to stop harness
+		fflush(stdout);
+		exit(0);
+	}
+	#endif
 	nodes_map[index].map_children.insert(std::pair<unsigned char,unsigned int>(c, next_node_child));
 	return next_node_child++;
 }
@@ -436,6 +447,7 @@ int main() {
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
 
 	free(nodes_ar);
+	free(nodes_map);
 	free(line);
 	return 0;
 }
