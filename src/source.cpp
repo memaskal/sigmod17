@@ -28,8 +28,8 @@
 
 
 
-#define MAX_NODES			150000000
-#define MAX_USED_CHAR   	256
+#define MAX_NODES			300000000L
+#define MAX_USED_CHAR   	255
 #define MAX_ARRAY_NODES 	50000000
 
 
@@ -79,8 +79,8 @@ NODE_MAP* nodes_map;
 int next_node_child = 2; // always start from position 2
 int missed_arrays = 0;
 
-N_GRAM search_state[MAX_NODES];
-unsigned int results_list[MAX_NODES]; // max nodes
+N_GRAM* search_state;
+unsigned int* results_list; // max nodes
 size_t results_found = 0; // free spot 
 
 
@@ -94,6 +94,13 @@ int total_query = 0;
 int total_search = 0;
 int total_results = 0;
 #endif
+
+void print_report() { 
+	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
+	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
+			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
+
+}
 
 
 inline void init_node_ar(NODE_AR* node) {
@@ -114,17 +121,19 @@ inline void init_node_map(NODE_MAP* node) {
 
 
 void init_arrays() {
-	debug_print("Sizeof NODE_AR: %zu - Sizeof NODE_MAP: %zu\n", sizeof(NODE_AR), sizeof(NODE_MAP));
+//	debug_print("Sizeof NODE_AR: %zu - Sizeof NODE_MAP: %zu\n", sizeof(NODE_AR), sizeof(NODE_MAP));
 
 	unsigned int i;
 
+	
 	#ifndef NDEBUG
 	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
+		debug_print("Allocating %zuMB in %d\n", (MAX_NODES*sizeof(unsigned int) + MAX_NODES*sizeof(N_GRAM) + (size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
 		sleep(1);
 	}
 	#endif
-
+	search_state = (N_GRAM*) malloc(MAX_NODES*sizeof(N_GRAM));
+	results_list = (unsigned int*) malloc(MAX_NODES*sizeof(unsigned int));
 
 	nodes_ar = (NODE_AR*) malloc(MAX_ARRAY_NODES*sizeof(NODE_AR));
 	assert(nodes_ar);
@@ -133,12 +142,13 @@ void init_arrays() {
 		init_node_ar(&nodes_ar[i]);
 	}
 
-
 	// init NODE_MAP
 	nodes_map = (NODE_MAP*) malloc(MAX_MAP_NODES * sizeof(NODE_MAP));
 	for (i = 0; i < MAX_MAP_NODES; ++i) {
 		init_node_map(&nodes_map[i]);
 	}
+
+
 }
 
 char get_ending(unsigned int index) {
@@ -194,6 +204,7 @@ unsigned int get_create_child(unsigned int index, unsigned char c) {
 	#ifndef NDEBUG
 	if (index >= MAX_MAP_NODES) { 
 		debug_print("Error. Max nodes are not enough!\n"); 
+		print_report();
 		printf("\n"); // to stop harness
 		fflush(stdout);
 		exit(0);
@@ -385,8 +396,8 @@ int main() {
 	debug_print("TOTAL: Words added: %zu\n", words_added); 
 
 	// Wait 2 seconds before printing R
-	debug_print("Waiting 3 seconds for swap\n");
-	sleep(3);
+	debug_print("Waiting 2 seconds\n");
+	sleep(2);
 	debug_print("Finished sleeping.\n");
 
 	size_t i;
@@ -441,11 +452,7 @@ int main() {
 			break;
 		}
 	}
-
-	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
-	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
-			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
-
+	print_report();
 	free(nodes_ar);
 	free(nodes_map);
 	free(line);
