@@ -3,7 +3,7 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
-
+#include <map>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -27,9 +27,9 @@
 // Use small value if ARRAY_NODES is small
 
 
-#define MAX_NODES	400000
-#define MAX_USED_CHAR   256
-
+#define MAX_NODES			400000
+#define MAX_USED_CHAR   	256
+#define MAX_ARRAY_NODES 	100000
 
 
 
@@ -54,12 +54,13 @@
 #endif // NDEBUG
 
 
-#pragma GCC diagnostic ignored "-Wchar-subscripts" // TODO: fix all chars to unsigned chars. Need to make getline accept unsigned char
-
-
-struct NODE {
+struct NODE_AR {
 	char word_ending;			// NOTE: type for bool values
 	unsigned int ar_children[MAX_USED_CHAR];
+};
+struct NODE_MAP {
+	char word_ending;
+	std::map<unsigned char, unsigned int> map_children;
 };
 
 
@@ -68,7 +69,7 @@ struct N_GRAM {
 	unsigned int end;
 };
 
-NODE* nodes;
+NODE_AR* nodes_ar;
 
 int next_node_child = 2; // always start from position 2
 int missed_arrays = 0;
@@ -90,7 +91,7 @@ int total_results = 0;
 #endif
 
 
-inline void init_node(NODE* node) {
+inline void init_node_ar(NODE_AR* node) {
 
 	unsigned int i;
 	unsigned int *children = node->ar_children;
@@ -108,29 +109,36 @@ void init_arrays() {
 
 	#ifndef NDEBUG
 	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_NODES * sizeof(NODE) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
+		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_ARRAY_NODES * sizeof(NODE) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
 		sleep(1);
 	}
 	#endif
 
 
-	nodes = (NODE*) malloc(MAX_NODES*sizeof(NODE));
-	assert(nodes);
+	nodes_ar = (NODE_AR*) malloc(MAX_ARRAY_NODES*sizeof(NODE_AR));
+	assert(nodes_ar);
 
-	for (i = 0; i < MAX_NODES; ++i) {
-		init_node(&nodes[i]);
+	for (i = 0; i < MAX_ARRAY_NODES; ++i) {
+		init_node_ar(&nodes_ar[i]);
 	}
 }
 
+inline char get_ending(unsigned int index) {
+	return nodes_ar[index].word_ending;
+}
 
-inline unsigned int get_child(NODE* root, unsigned char c) {
-	return root->ar_children[c];
+inline void set_ending(unsigned int index, char is_ending) {
+	nodes_ar[index].word_ending = is_ending;
+}
+
+inline unsigned int get_child(unsigned int index, unsigned char c) {
+	return nodes_ar[index].ar_children[c];
 }
 
 
-inline unsigned int get_create_child(NODE* root, unsigned char c) {
+inline unsigned int get_create_child(unsigned int index, unsigned char c) {
 
-	unsigned int *child = &root->ar_children[c];
+	unsigned int *child = &nodes_ar[index].ar_children[c];
 
 	if (*child == 0) {
 		*child = next_node_child++;
@@ -145,12 +153,12 @@ void add_word(const char* substr) {
 	assert(substr);
 
 	while (*substr != '\0') {
-		node_index = get_create_child(&nodes[node_index], *substr);
+		node_index = get_create_child(node_index, *substr);
 		++substr;
 		debug_only(total_len_add++);
 	}
 
-	nodes[node_index].word_ending = 1;
+	set_ending(node_index, 1);
 }
 
 
@@ -162,7 +170,7 @@ void remove_word(const char* substr) {
 	assert(substr);
 
 	while (*substr != '\0') {
-		node_index = get_child(&nodes[node_index], *substr);
+		node_index = get_child(node_index, *substr);
 		if (node_index == 0) {
 			return;
 		}
@@ -170,7 +178,7 @@ void remove_word(const char* substr) {
 		debug_only(total_len_delete++);
 	}
 
-	nodes[node_index].word_ending = 0;
+	set_ending(node_index, 0);
 }
 
 
@@ -184,8 +192,9 @@ void search_from(const char* search, const size_t start) {
 	const char *str_start = search;
 
 	while (*search != '\0' && node_index != 0) {
-	//	debug_print("Word ending %d at index: %d\n", nodes[node_index].word_ending, node_index);
-		if (nodes[node_index].word_ending == 1 && (*search == ' ' || *search == '\0')) {
+
+		if (get_ending(node_index) == 1 && (*search == ' ' || *search == '\0')) {
+
 			#pragma omp critical
 			if (start < search_state[node_index].start) {
 
@@ -199,11 +208,11 @@ void search_from(const char* search, const size_t start) {
 			}
 		}
 
-		node_index = get_child(&nodes[node_index], *search);
+		node_index = get_child(node_index, *search);
 		++search;
 	}
 
-	if (node_index != 0 && *search == '\0' && nodes[node_index].word_ending == 1) {
+	if (node_index != 0 && *search == '\0' && get_ending(node_index) == 1) {
 
 		#pragma omp critical
 		if (start < search_state[node_index].start) {
@@ -380,7 +389,7 @@ int main() {
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
 
-	free(nodes);
+	free(nodes_ar);
 	free(line);
 	return 0;
 }
