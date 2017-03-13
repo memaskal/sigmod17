@@ -15,8 +15,8 @@
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 4
-#define PARALLEL_CHUNK_SIZE 768
+#define NUM_THREADS 10
+#define PARALLEL_CHUNK_SIZE 512
 
 
 // ARRAY AND MEMORY CONFIGURATION
@@ -28,11 +28,11 @@
 
 
 
-#define MAX_NODES			300000000L
+#define MAX_NODES		900000000L
 #define MAX_USED_CHAR   	255
-#define MAX_ARRAY_NODES 	50000000
+#define MAX_ARRAY_NODES 	8000000
 
-
+#define MAX_RESULTS 	10000000
 
 #define MAX_MAP_NODES (MAX_NODES - MAX_ARRAY_NODES)
 
@@ -128,12 +128,12 @@ void init_arrays() {
 	
 	#ifndef NDEBUG
 	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", (MAX_NODES*sizeof(unsigned int) + MAX_NODES*sizeof(N_GRAM) + (size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
+		debug_print("Allocating %zuMB in %d\n", (MAX_RESULTS*sizeof(unsigned int) + MAX_NODES*sizeof(N_GRAM) + (size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
 		sleep(1);
 	}
 	#endif
 	search_state = (N_GRAM*) malloc(MAX_NODES*sizeof(N_GRAM));
-	results_list = (unsigned int*) malloc(MAX_NODES*sizeof(unsigned int));
+	results_list = (unsigned int*) malloc(MAX_RESULTS*sizeof(unsigned int));
 
 	nodes_ar = (NODE_AR*) malloc(MAX_ARRAY_NODES*sizeof(NODE_AR));
 	assert(nodes_ar);
@@ -143,10 +143,10 @@ void init_arrays() {
 	}
 
 	// init NODE_MAP
-	nodes_map = (NODE_MAP*) malloc(MAX_MAP_NODES * sizeof(NODE_MAP));
-	for (i = 0; i < MAX_MAP_NODES; ++i) {
-		init_node_map(&nodes_map[i]);
-	}
+  	nodes_map = (NODE_MAP*) malloc(MAX_MAP_NODES * sizeof(NODE_MAP));
+  	for (i = 0; i < MAX_MAP_NODES; ++i) {
+  		init_node_map(&nodes_map[i]);
+  	}
 
 
 }
@@ -377,7 +377,7 @@ int main() {
 	init_arrays();
 
 	//maybe larger for fiewer reallocations
-	size_t len = 30000;
+	size_t len = 1000000;
 	char *line = (char*)malloc(len * sizeof(char));
 	assert(line);
 
@@ -394,13 +394,14 @@ int main() {
 		++words_added;
 	}
 	debug_print("TOTAL: Words added: %zu\n", words_added); 
+	size_t i;
 
 	// Wait 2 seconds before printing R
-	debug_print("Waiting 2 seconds\n");
-	sleep(2);
+	//debug_print("Waiting 5 seconds\n");
+	sleep(5);
 	debug_print("Finished sleeping.\n");
 
-	size_t i;
+
 	for (i = 0; i < MAX_NODES; ++i) {
 		search_state[i].start = MAX_VAL;
 	}
