@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -Wextra -Wchar-subscripts -Werror
-OMP=-fopenmp
+OMP=-pthread
 NOMP=-Wno-unknown-pragmas
 OPTIM_FLAGS=-O3
 

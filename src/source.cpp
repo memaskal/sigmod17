@@ -3,20 +3,20 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
-
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
+#include <pthread.h>
+// for the semaphores
+#include <sys/types.h> 
+#include <sys/ipc.h>
+#include <sys/sem.h> 
 
 // Debugging defines
-#define NDEBUG
+//#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 4
-#define PARALLEL_CHUNK_SIZE 768
+#define NUM_THREADS 1
+#define PARALLEL_CHUNK_SIZE 728
 
 
 // ARRAY AND MEMORY CONFIGURATION
@@ -27,10 +27,8 @@
 // Use small value if ARRAY_NODES is small
 
 
-#define MAX_NODES	400000
-#define MAX_USED_CHAR   256
-
-
+#define MAX_NODES	200000
+#define MAX_USED_CHAR   146
 
 
 // define max value
@@ -107,8 +105,8 @@ void init_arrays() {
 	unsigned int i;
 
 	#ifndef NDEBUG
-	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_NODES * sizeof(NODE) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 4-i);
+	for (i = 0; i < 2; ++i) {
+		debug_print("Allocating %zuMB in %d\n", ((size_t)MAX_NODES * sizeof(NODE) + (size_t)MAX_NODES * sizeof(N_GRAM))/ 1000000, 2-i);
 		sleep(1);
 	}
 	#endif
@@ -180,13 +178,15 @@ void search_from(const char* search, const size_t start) {
 
 	assert(search);
 	debug_only(total_search++);
+	
+	//debug_print("search for : %s\n", search);
 
 	const char *str_start = search;
 
 	while (*search != '\0' && node_index != 0) {
 	//	debug_print("Word ending %d at index: %d\n", nodes[node_index].word_ending, node_index);
 		if (nodes[node_index].word_ending == 1 && (*search == ' ' || *search == '\0')) {
-			#pragma omp critical
+			//#pragma omp critical
 			if (start < search_state[node_index].start) {
 
 				if (search_state[node_index].start == MAX_VAL) {
@@ -205,7 +205,7 @@ void search_from(const char* search, const size_t start) {
 
 	if (node_index != 0 && *search == '\0' && nodes[node_index].word_ending == 1) {
 
-		#pragma omp critical
+		//#pragma omp critical
 		if (start < search_state[node_index].start) {
 			if (search_state[node_index].start == MAX_VAL) {
 				results_list[results_found++] = node_index;
@@ -225,37 +225,117 @@ inline int comparator(const N_GRAM* left, const N_GRAM* right) {
 }
 
 
-int search_implementation(const char* search, const size_t search_len) {
+#define UP 0
+#define DOWN 1
+#define QUERY_OP 0
+#define SORT_OP 1
+#define QUEUE_SIZE 1000
 
-	// This should only be run by master thread
-	size_t i;
+size_t len;
+char *line;
+int terminate_all = 0;
 
-	// set to zero for the new search
-	results_found = 0;
+typedef struct {
+	char action;
+	size_t batch_index;
+} JOB;
 
-	search_from(search, 0);
-	debug_only(total_len_query+=search_len);
 
-	#pragma omp parallel num_threads(NUM_THREADS)
-	{
-		// NOTE: n_start > search, no need for pntr_diff types
-		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE)
-		for (i = 1; i < search_len; ++i) {
-			if (search[i] == ' ') {
-				search_from(search + i + 1, i + 1);
-			}
+typedef struct {
+	JOB jobs[QUEUE_SIZE];	// the queue containing the jobs
+	size_t len;				// length of jobs
+	pthread_mutex_t mutex;
+	pthread_cond_t can_produce;
+	pthread_cond_t can_consume;
+} QUEUE;
+
+
+QUEUE queue = {
+	{},
+	0,
+	PTHREAD_MUTEX_INITIALIZER,
+	PTHREAD_COND_INITIALIZER,
+	PTHREAD_COND_INITIALIZER
+};
+
+
+
+int sem_id;
+struct sembuf sem_ops[][2] = {
+	{	// Operations for query
+		{0,  1,  0}, 
+		{0, -1,  0}
+	},
+	{	// Operations for sorting
+		{0,  NUM_THREADS,  0},
+		{0, -NUM_THREADS,  0}
+	}		
+};
+
+
+
+void new_job(JOB job) {
+
+	pthread_mutex_lock(&queue.mutex);
+	
+	while (queue.len >= QUEUE_SIZE) {
+		pthread_cond_wait(&queue.can_produce, &queue.mutex);
+	}
+	
+	//debug_print("Description %c\ntext: %s\n", job.action, &line[job.batch_index]);	
+	queue.jobs[queue.len++] = job;
+	
+	pthread_cond_signal(&queue.can_consume);
+	pthread_mutex_unlock(&queue.mutex);
+}
+
+
+JOB get_job() {
+	
+	JOB job;
+		
+	pthread_mutex_lock(&queue.mutex);
+	
+	while (queue.len <= 0) {
+		pthread_cond_wait(&queue.can_consume, &queue.mutex);
+	}
+	
+	job = queue.jobs[--queue.len];
+	
+	pthread_cond_signal(&queue.can_produce);
+	pthread_mutex_unlock(&queue.mutex);
+	
+	return job;
+}
+
+
+void search(char *search, size_t start) {
+
+	// fisrt search allways start at character
+	search_from(search++, start++);
+	
+	while(*search) {
+		if (*search == ' ') {
+			search_from(search + 1, start + 1);
 		}
-	} // end of pragma omp parallel
+		++search;
+		++start;
+	}
+}
+
+
+void sort_results() {
 
 	if (results_found == 0) {
 		printf("-1\n");
 		//	debug_print("\n");
-		return 0;
+		return;
 	}
 
 	// Serial insertion sort
 	int j;
 	int temp;
+	size_t i;
 
 	for (i = 1; i < results_found; ++i) {
 		j = i - 1;
@@ -274,7 +354,7 @@ int search_implementation(const char* search, const size_t search_len) {
     for (i = 0; i < results_found - 1; ++i) {
 
         found = &search_state[results_list[i]];
-        fwrite(&search[found->start], 1, found->end, stdout);
+        fwrite(&line[found->start], 1, found->end, stdout);
 
         // zero it for the next search
         found->start = MAX_VAL;
@@ -283,25 +363,128 @@ int search_implementation(const char* search, const size_t search_len) {
     }
 
     found = &search_state[results_list[i]];
-    fwrite(&search[found->start], 1, found->end, stdout);
+    fwrite(&line[found->start], 1, found->end, stdout);
 
     // zero it for the next search
     found->start = MAX_VAL;
 
     printf("\n");
-	debug_only(total_results+=results_found);
-	return 0;
 }
+
+
+void *job_handler(void *) {
+
+	JOB job;
+	//size_t thread_id = *(size_t *)id;
+	
+	// while they are available jobs and 
+	// input haven't finished yet
+	while (!terminate_all || queue.len) {
+		
+		// thread requests of a new job
+		job = get_job();	
+		
+		switch (job.action) {
+		case 'Q':
+			//semop(sem_id, &sem_ops[QUERY_OP][DOWN], 1);
+			search(&line[job.batch_index], job.batch_index);
+			//semop(sem_id, &sem_ops[QUERY_OP][UP], 1);
+			break;
+		case 'A':
+			add_word(&line[job.batch_index]);
+			break;
+		case 'D':
+			remove_word(&line[job.batch_index]);
+			break;
+		case 'S':
+			//semop(sem_id, &sem_ops[SORT_OP][DOWN], 1);
+			sort_results();
+			//semop(sem_id, &sem_ops[SORT_OP][UP], 1);
+			break;
+		}
+	}	
+	return NULL;
+}
+
+
+void input_handler() {
+	
+	int i, jobs;
+	ssize_t read;
+	size_t length;
+	char *task, *val;
+	const char *delim = "\n";
+	
+	while (1) {
+		
+		// read a whole batch into memory
+		if ((read = getdelim(&line, &len, 'F', stdin)) != -1) {
+			
+			// remove F
+			line[read - 1] = '\0';
+			
+			// every new line is a new job
+			task = strtok(line, delim);
+			
+			while (task != NULL) {
+			
+				if (task[0] == 'Q') {
+					
+					// split query to small jobs to be handled 
+					// by single threads
+					val = &task[2];
+					length = strlen(task);
+					
+					
+					// sort the results task
+					new_job((JOB) {'S', 0});
+					
+					
+					new_job((JOB) {'Q', (size_t)(val - line)});	
+					
+					jobs = length / PARALLEL_CHUNK_SIZE + 1;
+									
+					for (i = 0; i < jobs; ++i) {
+						
+						val += PARALLEL_CHUNK_SIZE;
+						while (*val && *val != ' ') ++val;
+						if (!*val) break;
+						
+						// +1 to start from next space
+						new_job((JOB) {'Q', (size_t)(val - line) + 1});		
+					}													
+				}
+				else {
+					// line - task => get the beggining of action
+					// + 2 offset to remove the action, space chars
+					new_job((JOB) {task[0], (size_t)(task - line) + 2});			
+				}
+				task = strtok(NULL, delim);
+			}						
+		}
+		else {
+			// end of file or error
+			terminate_all = 1;
+			return;			
+		}
+	}
+} 
 
 
 
 int main() {
 
+	// init semaphore
+	if ((sem_id = semget(IPC_PRIVATE, 1, 0600)) == -1) {	
+		perror("semget");
+		exit(1);
+	}
+
 	init_arrays();
 
 	//maybe larger for fiewer reallocations
-	size_t len = 30000;
-	char *line = (char*)malloc(len * sizeof(char));
+	len = 30000;
+	line = (char*)malloc(len * sizeof(char));
 	assert(line);
 
 	int input_len;
@@ -320,7 +503,7 @@ int main() {
 
 	// Wait 2 seconds before printing R
 	debug_print("Waiting 3 seconds for swap\n");
-	sleep(3);
+	//sleep(3);
 	debug_print("Finished sleeping.\n");
 
 	size_t i;
@@ -328,58 +511,34 @@ int main() {
 		search_state[i].start = MAX_VAL;
 	}
 
-	char action;
-	int action_count = 0;
-	int queries_count = 0;
+	// set semaphore to its max value
+	semop(sem_id, &sem_ops[SORT_OP][UP], 1);
 
+	// create all worker threads here
+	pthread_t workers[NUM_THREADS];
+	
+	for (i = 0; i < NUM_THREADS; ++i) {
+		// create worker threads
+		pthread_create(&workers[i], NULL, job_handler, (void*)i);
+	}
+		
 	// totaly ready to start
 	printf("R\n");
 	// TODO: find faster way to force fflush
 	fflush(stdout);
 
-	while (1) {
+	// Run my main thread
+	input_handler();
+	
+	
+	for (i = 0; i < NUM_THREADS; ++i) {
+		// wait for all threads to finish
+		pthread_join(workers[i], NULL);
+	}    
 
-		if ((action = getchar()) == EOF) {
-			break;
-		}
-		else if (action == 'F') {
-			fflush(stdout);
-			getchar();
-			continue;
-		}
-
-		// read junk space
-		getchar();
-
-		// TDDO: implement fast input
-		// Read the rest of input
-		input_len = getline(&line, &len, stdin);
-		line[input_len - 1] = '\0';
-		//action = line[0];
-		//if (action_count % 10 == 0) debug_print("Actions: %d\n", action_count);
-		action_count++;
-
-		switch (action) {
-		case 'Q':
-			debug_only(total_query++);
-			queries_count++;
-			search_implementation(line, input_len - 1);
-			break;
-		case 'A':
-			debug_only(total_add++);
-			add_word(line);
-			break;
-		case 'D':
-			debug_only(total_delete++);
-			remove_word(line);
-			break;
-		}
-	}
-
-	debug_print("Arrays used: %d\nArrays missed: %d\n", next_node_child, missed_arrays);
-	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
-			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
-
+	// remove semaphore
+	semctl(sem_id, 0, IPC_RMID);
+	
 	free(nodes);
 	free(line);
 	return 0;
