@@ -15,7 +15,7 @@
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 10
+#define NUM_THREADS 4
 #define PARALLEL_CHUNK_SIZE 512
 
 
@@ -28,14 +28,17 @@
 
 
 
-#define MAX_NODES		900000000L
+//#define MAX_NODES		800000000L
+#define MAX_NODES			10000000L
 #define MAX_USED_CHAR   	255
-#define MAX_ARRAY_NODES 	8000000
+#define MAX_ARRAY_NODES 	2
 
-#define MAX_RESULTS 	10000000
+#define MAX_RESULTS 	5000000
 
 #define MAX_MAP_NODES (MAX_NODES - MAX_ARRAY_NODES)
 
+
+#define MAX_TRIEGRAMS 10000000
 
 // define max value
 #define MAX_VAL UINT_MAX
@@ -62,11 +65,11 @@ struct NODE_AR {
 	char word_ending;			// NOTE: type for bool values
 	unsigned int ar_children[MAX_USED_CHAR];
 };
+
 struct NODE_MAP {
 	char word_ending;
 	std::map<unsigned char, unsigned int> map_children;
 };
-
 
 struct N_GRAM {
 	unsigned int start;
@@ -84,6 +87,14 @@ unsigned int* results_list; // max nodes
 size_t results_found = 0; // free spot 
 
 
+
+typedef struct NODE_GRAM {
+	char word_ending;
+	std::map<std::string, unsigned int> children;
+} NODE_GRAM;
+
+NODE_GRAM* nodes_grams;
+
 #ifndef NDEBUG
 int total_len_add = 0;
 int total_len_delete = 0;
@@ -99,6 +110,17 @@ void print_report() {
 	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
+
+	int i;
+	for (i=0; i<next_node_child; ++i) {
+		debug_print("MAP %d CONTAINS:\n", i);
+		int j = 0;
+		for (auto const& data : nodes_grams[i].children) {
+    		debug_print("Line %d: %s\n", j, data.first.c_str());
+    		j++;
+		}
+    	
+	}
 
 }
 
@@ -119,6 +141,7 @@ inline void init_node_map(NODE_MAP* node) {
 	node->map_children = std::map<unsigned char, unsigned int>();
 }
 
+void init_node_gram(unsigned int i);
 
 void init_arrays() {
 //	debug_print("Sizeof NODE_AR: %zu - Sizeof NODE_MAP: %zu\n", sizeof(NODE_AR), sizeof(NODE_MAP));
@@ -129,11 +152,12 @@ void init_arrays() {
 	#ifndef NDEBUG
 	for (i = 0; i < 4; ++i) {
 		debug_print("Allocating %zuMB in %d\n", (MAX_RESULTS*sizeof(unsigned int) + MAX_NODES*sizeof(N_GRAM) + (size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
-		sleep(1);
+	//	sleep(1);
 	}
 	#endif
 	search_state = (N_GRAM*) malloc(MAX_NODES*sizeof(N_GRAM));
 	results_list = (unsigned int*) malloc(MAX_RESULTS*sizeof(unsigned int));
+
 
 	nodes_ar = (NODE_AR*) malloc(MAX_ARRAY_NODES*sizeof(NODE_AR));
 	assert(nodes_ar);
@@ -148,10 +172,14 @@ void init_arrays() {
   		init_node_map(&nodes_map[i]);
   	}
 
+  	nodes_grams = (NODE_GRAM *) malloc(MAX_TRIEGRAMS * sizeof(NODE_GRAM));
+  	for (i = 0; i < MAX_TRIEGRAMS; ++i) {
+  		init_node_gram(i);
+  	}
 
 }
-
-char get_ending(unsigned int index) {
+/*
+inline char get_ending(unsigned int index) {
 	if (index < MAX_ARRAY_NODES) {
 		return nodes_ar[index].word_ending;
 	}
@@ -160,7 +188,7 @@ char get_ending(unsigned int index) {
 	return nodes_map[index].word_ending;
 }
 
-void set_ending(unsigned int index, char is_ending) {
+inline void set_ending(unsigned int index, char is_ending) {
 	if (index < MAX_ARRAY_NODES) {
 		nodes_ar[index].word_ending = is_ending;
 		return;
@@ -171,7 +199,7 @@ void set_ending(unsigned int index, char is_ending) {
 	nodes_map[index].word_ending = is_ending;
 }
 
-unsigned int get_child(unsigned int index, unsigned char c) {
+inline unsigned int get_child(unsigned int index, unsigned char c) {
 	if (index < MAX_ARRAY_NODES) {
 		return nodes_ar[index].ar_children[c];
 	}
@@ -185,7 +213,7 @@ unsigned int get_child(unsigned int index, unsigned char c) {
 }
 
 // TODO: rewrite
-unsigned int get_create_child(unsigned int index, unsigned char c) {
+inline unsigned int get_create_child(unsigned int index, unsigned char c) {
 	unsigned int child = get_child(index, c);
 	if ( child!= 0) {
 		return child;
@@ -214,44 +242,83 @@ unsigned int get_create_child(unsigned int index, unsigned char c) {
 	return next_node_child++;
 }
 
+*/
 
-void add_word(const char* substr) {
 
+void init_node_gram (unsigned int index) {
+	nodes_grams[index].word_ending = 0;
+	nodes_grams[index].children = std::map<std::string, unsigned int>();
+}
+
+unsigned int get_ngram (unsigned int index, const std::string* ngram) {
+	std::map<std::string, unsigned int>::iterator it = nodes_grams[index].children.find(*ngram);
+	if (it != nodes_grams[index].children.end()) {
+		return it->second;
+	}
+	return 0;
+}
+
+unsigned int get_create_ngram (unsigned int index, const std::string* ngram) {
+	std::map<std::string, unsigned int>::iterator it = nodes_grams[index].children.find(*ngram);
+	if (it != nodes_grams[index].children.end()) {
+		return it->second;
+	}
+	debug_print("Adding word: %s\n", ngram->c_str());
+	nodes_grams[index].children.insert(std::pair<std::string,unsigned int>(*ngram, next_node_child));
+	++next_node_child;
+	return next_node_child - 1;
+}
+
+inline void set_ending_ngram(unsigned int index, char ending) {
+	nodes_grams[index].word_ending = ending;
+}
+
+inline char get_ending_ngram(unsigned int index) {
+	return nodes_grams[index].word_ending;
+}
+
+inline void add_word(char* substr) {
 	unsigned int node_index = 1;
 	assert(substr);
-
+	std::string temp;
+	unsigned int i;
 	while (*substr != '\0') {
-		node_index = get_create_child(node_index, *substr);
-		++substr;
+		i = 0;
+		while(substr[i] != ' ' ) { assert(substr[i] != '\0'); ++i; }
+		debug_print("Going into.\n");
+		temp.assign(substr, i);
+		node_index = get_create_ngram(node_index, &temp);
+		substr += i + 1;
 		debug_only(total_len_add++);
 	}
 
-	set_ending(node_index, 1);
+	set_ending_ngram(node_index, 1);
 }
-
 
 // NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
-void remove_word(const char* substr) {
-
+void remove_word(char* substr) {
 	unsigned int node_index = 1;
 	assert(substr);
-
+	std::string temp;
+	unsigned int i;
 	while (*substr != '\0') {
-		node_index = get_child(node_index, *substr);
+		i = 0;
+		while(substr[i] != ' ' ) { assert(substr[i] != '\0'); ++i; }
+		temp.assign(substr, i);
+		node_index = get_ngram(node_index, &temp);
 		if (node_index == 0) {
 			return;
 		}
-		++substr;
-		debug_only(total_len_delete++);
+		substr += i + 1;
+		debug_only(total_len_add++);
 	}
 
-	set_ending(node_index, 0);
+	set_ending_ngram(node_index, 0);
 }
 
-
 void search_from(const char* search, const size_t start) {
-
+	std::string word;
 	unsigned int node_index = 1;
 
 	assert(search);
@@ -259,28 +326,31 @@ void search_from(const char* search, const size_t start) {
 
 	const char *str_start = search;
 
+	unsigned int i = 0;
+
 	while (*search != '\0' && node_index != 0) {
+		i = 0;
+		while (search[i] != ' ') { assert(search[i]!='\0'); ++i; }
+		word.assign(search, i);
+		node_index = get_ngram(node_index, &word);
 
-		if (get_ending(node_index) == 1 && (*search == ' ' || *search == '\0')) {
-
+		if (get_ending_ngram(node_index) == 1) {
 			#pragma omp critical
 			if (start < search_state[node_index].start) {
 
 				if (search_state[node_index].start == MAX_VAL) {
 					results_list[results_found++] = node_index;
 				}
-
 				search_state[node_index].start = start;
-				search_state[node_index].end = search - str_start;
+				search_state[node_index].end = (search + i) - str_start;
 				// list will be used to find the results and zero the search_state table
 			}
 		}
 
-		node_index = get_child(node_index, *search);
-		++search;
+		search += i+1;
 	}
 
-	if (node_index != 0 && *search == '\0' && get_ending(node_index) == 1) {
+	if (node_index != 0 && *search == '\0' && get_ending_ngram(node_index) == 1) {
 
 		#pragma omp critical
 		if (start < search_state[node_index].start) {
@@ -288,7 +358,7 @@ void search_from(const char* search, const size_t start) {
 				results_list[results_found++] = node_index;
 			}
 			search_state[node_index].start = start;
-			search_state[node_index].end = search - str_start;
+			search_state[node_index].end = (search + i) - str_start;
 		}
 	}
 }
@@ -317,7 +387,7 @@ int search_implementation(const char* search, const size_t search_len) {
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
 		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE)
-		for (i = 1; i < search_len; ++i) {
+		for (i = 1; i < search_len - 1; ++i) {
 			if (search[i] == ' ') {
 				search_from(search + i + 1, i + 1);
 			}
@@ -376,6 +446,9 @@ int main() {
 
 	init_arrays();
 
+	
+
+
 	//maybe larger for fiewer reallocations
 	size_t len = 1000000;
 	char *line = (char*)malloc(len * sizeof(char));
@@ -389,7 +462,8 @@ int main() {
 		(line[0] != 'S')) {
 
 		// add the \0 char replacing \n 
-		line[input_len - 1] = '\0';
+		line[input_len - 1] = ' ';
+		line[input_len] = '\0';
 		add_word(line);
 		++words_added;
 	}
@@ -397,8 +471,8 @@ int main() {
 	size_t i;
 
 	// Wait 2 seconds before printing R
-	//debug_print("Waiting 5 seconds\n");
-	sleep(5);
+	debug_print("Waiting 5 seconds\n");
+	sleep(2);
 	debug_print("Finished sleeping.\n");
 
 
@@ -417,7 +491,7 @@ int main() {
 
 	while (1) {
 
-		if ((action = getchar()) == EOF) {
+		if ((action = getchar()) == EOF || action == 'Q') {
 			break;
 		}
 		else if (action == 'F') {
@@ -432,7 +506,8 @@ int main() {
 		// TDDO: implement fast input
 		// Read the rest of input
 		input_len = getline(&line, &len, stdin);
-		line[input_len - 1] = '\0';
+		line[input_len - 1] = ' ';
+		line[input_len] = '\0';
 		//action = line[0];
 		//if (action_count % 10 == 0) debug_print("Actions: %d\n", action_count);
 		action_count++;
