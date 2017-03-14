@@ -15,7 +15,7 @@
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 1
+#define NUM_THREADS 4
 #define PARALLEL_CHUNK_SIZE 728
 
 
@@ -27,8 +27,8 @@
 // Use small value if ARRAY_NODES is small
 
 
-#define MAX_NODES	200000
-#define MAX_USED_CHAR   146
+#define MAX_NODES	500000
+#define MAX_USED_CHAR   256
 
 
 // define max value
@@ -86,6 +86,103 @@ int total_query = 0;
 int total_search = 0;
 int total_results = 0;
 #endif
+
+
+
+#define UP 0
+#define DOWN 1
+#define SINGLE 0
+#define ALL 1
+#define QUEUE_SIZE 1000
+
+size_t len;
+char *line;
+
+// set by input handler when input has finished
+int terminate_all = 0;
+pthread_mutex_t results_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct {
+	char action;
+	size_t batch_index;
+} JOB;
+
+
+typedef struct {
+	JOB jobs[QUEUE_SIZE];	// the queue containing the jobs
+	int head;
+	int tail;
+	pthread_mutex_t mutex;
+	pthread_cond_t can_produce;
+	pthread_cond_t can_consume;
+} QUEUE;
+
+
+QUEUE queue = {
+	{},
+	-1,
+	-1,
+	PTHREAD_MUTEX_INITIALIZER,
+	PTHREAD_COND_INITIALIZER,
+	PTHREAD_COND_INITIALIZER
+};
+
+
+int isFull(QUEUE q) {
+	return ((q.tail - QUEUE_SIZE) == q.head);
+}
+
+int isEmpty(QUEUE q) {
+	return (q.head == q.tail);
+}
+
+int sem_id;
+struct sembuf sem_ops[][2] = {
+	{	// Operations for query
+		{0,  1,  0}, 
+		{0, -1,  0}
+	},
+	{	// Operations for sorting
+		{0,  NUM_THREADS,  0},
+		{0, -NUM_THREADS,  0}
+	}		
+};
+
+
+void new_job(JOB job) {
+
+	pthread_mutex_lock(&queue.mutex);
+	
+	while (isFull(queue)) {
+		pthread_cond_wait(&queue.can_produce, &queue.mutex);
+	}
+	
+	//debug_print("Description %c\ntext: %s\n", job.action, &line[job.batch_index]);	
+	
+	queue.jobs[++queue.tail % QUEUE_SIZE] = job;
+	
+	pthread_cond_signal(&queue.can_consume);
+	pthread_mutex_unlock(&queue.mutex);
+}
+
+
+JOB get_job() {
+	
+	JOB job;
+		
+	pthread_mutex_lock(&queue.mutex);
+	
+	while (isEmpty(queue)) {
+		pthread_cond_wait(&queue.can_consume, &queue.mutex);
+	}
+	
+	job = queue.jobs[++queue.head % QUEUE_SIZE];
+	
+	pthread_cond_signal(&queue.can_produce);
+	pthread_mutex_unlock(&queue.mutex);
+	
+	return job;
+}
 
 
 inline void init_node(NODE* node) {
@@ -184,9 +281,10 @@ void search_from(const char* search, const size_t start) {
 	const char *str_start = search;
 
 	while (*search != '\0' && node_index != 0) {
-	//	debug_print("Word ending %d at index: %d\n", nodes[node_index].word_ending, node_index);
+		//	debug_print("Word ending %d at index: %d\n", nodes[node_index].word_ending, node_index);
 		if (nodes[node_index].word_ending == 1 && (*search == ' ' || *search == '\0')) {
-			//#pragma omp critical
+			
+			pthread_mutex_lock(&results_mutex);
 			if (start < search_state[node_index].start) {
 
 				if (search_state[node_index].start == MAX_VAL) {
@@ -197,6 +295,7 @@ void search_from(const char* search, const size_t start) {
 				search_state[node_index].end = search - str_start;
 				// list will be used to find the results and zero the search_state table
 			}
+			pthread_mutex_unlock(&results_mutex);
 		}
 
 		node_index = get_child(&nodes[node_index], *search);
@@ -205,7 +304,7 @@ void search_from(const char* search, const size_t start) {
 
 	if (node_index != 0 && *search == '\0' && nodes[node_index].word_ending == 1) {
 
-		//#pragma omp critical
+		pthread_mutex_lock(&results_mutex);
 		if (start < search_state[node_index].start) {
 			if (search_state[node_index].start == MAX_VAL) {
 				results_list[results_found++] = node_index;
@@ -213,99 +312,8 @@ void search_from(const char* search, const size_t start) {
 			search_state[node_index].start = start;
 			search_state[node_index].end = search - str_start;
 		}
+		pthread_mutex_unlock(&results_mutex);
 	}
-}
-
-
-inline int comparator(const N_GRAM* left, const N_GRAM* right) {
-	if (left->start != right->start) {
-		return (left->start > right->start) ? 1 : -1;
-	}
-	return (left->end > right->end) ? 1 : -1;
-}
-
-
-#define UP 0
-#define DOWN 1
-#define QUERY_OP 0
-#define SORT_OP 1
-#define QUEUE_SIZE 1000
-
-size_t len;
-char *line;
-int terminate_all = 0;
-
-typedef struct {
-	char action;
-	size_t batch_index;
-} JOB;
-
-
-typedef struct {
-	JOB jobs[QUEUE_SIZE];	// the queue containing the jobs
-	size_t len;				// length of jobs
-	pthread_mutex_t mutex;
-	pthread_cond_t can_produce;
-	pthread_cond_t can_consume;
-} QUEUE;
-
-
-QUEUE queue = {
-	{},
-	0,
-	PTHREAD_MUTEX_INITIALIZER,
-	PTHREAD_COND_INITIALIZER,
-	PTHREAD_COND_INITIALIZER
-};
-
-
-
-int sem_id;
-struct sembuf sem_ops[][2] = {
-	{	// Operations for query
-		{0,  1,  0}, 
-		{0, -1,  0}
-	},
-	{	// Operations for sorting
-		{0,  NUM_THREADS,  0},
-		{0, -NUM_THREADS,  0}
-	}		
-};
-
-
-
-void new_job(JOB job) {
-
-	pthread_mutex_lock(&queue.mutex);
-	
-	while (queue.len >= QUEUE_SIZE) {
-		pthread_cond_wait(&queue.can_produce, &queue.mutex);
-	}
-	
-	//debug_print("Description %c\ntext: %s\n", job.action, &line[job.batch_index]);	
-	queue.jobs[queue.len++] = job;
-	
-	pthread_cond_signal(&queue.can_consume);
-	pthread_mutex_unlock(&queue.mutex);
-}
-
-
-JOB get_job() {
-	
-	JOB job;
-		
-	pthread_mutex_lock(&queue.mutex);
-	
-	while (queue.len <= 0) {
-		pthread_cond_wait(&queue.can_consume, &queue.mutex);
-	}
-	
-	job = queue.jobs[--queue.len];
-	
-	pthread_cond_signal(&queue.can_produce);
-	pthread_mutex_unlock(&queue.mutex);
-	
-	return job;
 }
 
 
@@ -321,6 +329,14 @@ void search(char *search, size_t start) {
 		++search;
 		++start;
 	}
+}
+
+
+inline int comparator(const N_GRAM* left, const N_GRAM* right) {
+	if (left->start != right->start) {
+		return (left->start > right->start) ? 1 : -1;
+	}
+	return (left->end > right->end) ? 1 : -1;
 }
 
 
@@ -369,6 +385,8 @@ void sort_results() {
     found->start = MAX_VAL;
 
     printf("\n");
+    
+    results_found = 0;    
 }
 
 
@@ -379,16 +397,14 @@ void *job_handler(void *) {
 	
 	// while they are available jobs and 
 	// input haven't finished yet
-	while (!terminate_all || queue.len) {
+	while (!terminate_all || !isEmpty(queue)) {
 		
 		// thread requests of a new job
 		job = get_job();	
 		
 		switch (job.action) {
 		case 'Q':
-			//semop(sem_id, &sem_ops[QUERY_OP][DOWN], 1);
 			search(&line[job.batch_index], job.batch_index);
-			//semop(sem_id, &sem_ops[QUERY_OP][UP], 1);
 			break;
 		case 'A':
 			add_word(&line[job.batch_index]);
@@ -397,12 +413,12 @@ void *job_handler(void *) {
 			remove_word(&line[job.batch_index]);
 			break;
 		case 'S':
-			//semop(sem_id, &sem_ops[SORT_OP][DOWN], 1);
 			sort_results();
-			//semop(sem_id, &sem_ops[SORT_OP][UP], 1);
+			fflush(stdout);
 			break;
 		}
 	}	
+	debug_print("thread exiting");
 	return NULL;
 }
 
@@ -429,16 +445,11 @@ void input_handler() {
 			while (task != NULL) {
 			
 				if (task[0] == 'Q') {
-					
+				
 					// split query to small jobs to be handled 
 					// by single threads
 					val = &task[2];
 					length = strlen(task);
-					
-					
-					// sort the results task
-					new_job((JOB) {'S', 0});
-					
 					
 					new_job((JOB) {'Q', (size_t)(val - line)});	
 					
@@ -452,7 +463,11 @@ void input_handler() {
 						
 						// +1 to start from next space
 						new_job((JOB) {'Q', (size_t)(val - line) + 1});		
-					}													
+					}	
+					
+					// sort the results task
+					new_job((JOB) {'S', 0});
+																	
 				}
 				else {
 					// line - task => get the beggining of action
@@ -512,7 +527,7 @@ int main() {
 	}
 
 	// set semaphore to its max value
-	semop(sem_id, &sem_ops[SORT_OP][UP], 1);
+	semop(sem_id, &sem_ops[ALL][UP], 1);
 
 	// create all worker threads here
 	pthread_t workers[NUM_THREADS];
