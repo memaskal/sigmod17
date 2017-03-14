@@ -106,22 +106,27 @@ int total_search = 0;
 int total_results = 0;
 #endif
 
-void print_report() { 
+void print_report() {
+	#ifndef NDEBUG
 	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
 
 	int i;
+	int c = 0;
 	for (i=0; i<next_node_child; ++i) {
-		debug_print("MAP %d CONTAINS:\n", i);
 		int j = 0;
 		for (auto const& data : nodes_grams[i].children) {
     		debug_print("Line %d: %s\n", j, data.first.c_str());
     		j++;
 		}
+		if( j > 1){
+			debug_print("MAP %d CONTAINED %d ^^^^^^^^\n", i, c);
+			c++;
+		}	
     	
 	}
-
+	#endif
 }
 
 
@@ -263,7 +268,6 @@ unsigned int get_create_ngram (unsigned int index, const std::string* ngram) {
 	if (it != nodes_grams[index].children.end()) {
 		return it->second;
 	}
-	debug_print("Adding word: %s\n", ngram->c_str());
 	nodes_grams[index].children.insert(std::pair<std::string,unsigned int>(*ngram, next_node_child));
 	++next_node_child;
 	return next_node_child - 1;
@@ -285,7 +289,6 @@ inline void add_word(char* substr) {
 	while (*substr != '\0') {
 		i = 0;
 		while(substr[i] != ' ' ) { assert(substr[i] != '\0'); ++i; }
-		debug_print("Going into.\n");
 		temp.assign(substr, i);
 		node_index = get_create_ngram(node_index, &temp);
 		substr += i + 1;
