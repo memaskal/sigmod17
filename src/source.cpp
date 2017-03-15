@@ -15,7 +15,7 @@
 
 // PARALLEL CONFIGURATION
 //#define PARALLEL_SORT
-#define NUM_THREADS 10
+#define NUM_THREADS 4
 #define PARALLEL_CHUNK_SIZE 512
 
 
@@ -28,9 +28,9 @@
 
 
 
-#define MAX_NODES		900000000L
+#define MAX_NODES		10000000L
 #define MAX_USED_CHAR   	255
-#define MAX_ARRAY_NODES 	8000000
+#define MAX_ARRAY_NODES 	300000
 
 #define MAX_RESULTS 	10000000
 
@@ -83,6 +83,12 @@ N_GRAM* search_state;
 unsigned int* results_list; // max nodes
 size_t results_found = 0; // free spot 
 
+#define SET_ENDING_INDEX_TRUE(...)  __VA_ARGS__ |= ((unsigned int)1 << 31)
+#define SET_ENDING_INDEX_FALSE(...) __VA_ARGS__ &= ((unsigned int)~(1 << 31))
+
+#define GET_ENDING_INDEX(...) ((unsigned int)__VA_ARGS__ >> 31)
+
+#define INDEX_VALUE(...) ((unsigned int)__VA_ARGS__ & ~(1 << 31))
 
 #ifndef NDEBUG
 int total_len_add = 0;
@@ -99,7 +105,13 @@ void print_report() {
 	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
 			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
-
+/*	for (int i=0; i<10; ++i) {
+		debug_print("\nArray %d:\n", i);
+		for (int j=0; j<255; ++j) {
+			debug_print("%d ", nodes_ar[i].ar_children[j]);
+		}
+	}
+*/
 }
 
 
@@ -127,7 +139,7 @@ void init_arrays() {
 
 	
 	#ifndef NDEBUG
-	for (i = 0; i < 4; ++i) {
+	for (i = 0; i < 2; ++i) {
 		debug_print("Allocating %zuMB in %d\n", (MAX_RESULTS*sizeof(unsigned int) + MAX_NODES*sizeof(N_GRAM) + (size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
 		sleep(1);
 	}
@@ -152,15 +164,18 @@ void init_arrays() {
 }
 
 char get_ending(unsigned int index) {
+	return GET_ENDING_INDEX(index);
+	/*
 	if (index < MAX_ARRAY_NODES) {
 		return nodes_ar[index].word_ending;
 	}
 	// TODO: fix optimisation
 	index -= MAX_ARRAY_NODES;
 	return nodes_map[index].word_ending;
+	*/
 }
 
-void set_ending(unsigned int index, char is_ending) {
+/*void set_ending(unsigned int index, char is_ending) {
 	if (index < MAX_ARRAY_NODES) {
 		nodes_ar[index].word_ending = is_ending;
 		return;
@@ -170,15 +185,36 @@ void set_ending(unsigned int index, char is_ending) {
 
 	nodes_map[index].word_ending = is_ending;
 }
+*/
+void set_ending_at(unsigned int parent_index, unsigned char letter, char is_ending) {
+	unsigned int value = INDEX_VALUE(parent_index);
+	if (value < MAX_ARRAY_NODES) {
+		if (is_ending) {
+			SET_ENDING_INDEX_TRUE(nodes_ar[value].ar_children[letter]);
+			return;
+		}
+		SET_ENDING_INDEX_FALSE(nodes_ar[value].ar_children[letter]);	
+		return;
+	}
+	value -= MAX_ARRAY_NODES;
+	if (is_ending) {
+		SET_ENDING_INDEX_TRUE(nodes_map[value].map_children[letter]);
+		return;
+	}
+	SET_ENDING_INDEX_FALSE(nodes_map[value].map_children[letter]);	
+	return;
+
+}
 
 unsigned int get_child(unsigned int index, unsigned char c) {
-	if (index < MAX_ARRAY_NODES) {
-		return nodes_ar[index].ar_children[c];
+	unsigned int value = INDEX_VALUE(index);
+	if (value < MAX_ARRAY_NODES) {
+		return nodes_ar[value].ar_children[c];
 	}
 	// TODO: fix optimisation
-	index -= MAX_ARRAY_NODES;
-	std::map<unsigned char, unsigned int>::iterator it = nodes_map[index].map_children.find(c);
-	if (it != nodes_map[index].map_children.end()) {
+	value -= MAX_ARRAY_NODES;
+	std::map<unsigned char, unsigned int>::iterator it = nodes_map[value].map_children.find(c);
+	if (it != nodes_map[value].map_children.end()) {
 		return it->second;
 	}
 	return 0;
@@ -187,22 +223,23 @@ unsigned int get_child(unsigned int index, unsigned char c) {
 // TODO: rewrite
 unsigned int get_create_child(unsigned int index, unsigned char c) {
 	unsigned int child = get_child(index, c);
-	if ( child!= 0) {
+	if ( INDEX_VALUE(child) != 0) {
 		return child;
 	}
 
 	// Create child
-
-	if (index < MAX_ARRAY_NODES) {
+	unsigned int value = INDEX_VALUE(index);
+	if (value < MAX_ARRAY_NODES) {
 		// Parent is array
-		nodes_ar[index].ar_children[c] = next_node_child;
+		nodes_ar[value].ar_children[c] = next_node_child;
+		set_ending_at(value, c, GET_ENDING_INDEX(child));
 		return next_node_child++;
 	}
 	
 	//Parent is map
-	index -= MAX_ARRAY_NODES;
+	value -= MAX_ARRAY_NODES;
 	#ifndef NDEBUG
-	if (index >= MAX_MAP_NODES) { 
+	if (value >= MAX_MAP_NODES) { 
 		debug_print("Error. Max nodes are not enough!\n"); 
 		print_report();
 		printf("\n"); // to stop harness
@@ -210,7 +247,8 @@ unsigned int get_create_child(unsigned int index, unsigned char c) {
 		exit(0);
 	}
 	#endif
-	nodes_map[index].map_children.insert(std::pair<unsigned char,unsigned int>(c, next_node_child));
+	nodes_map[value].map_children.insert(std::pair<unsigned char,unsigned int>(c, next_node_child));
+	set_ending_at(value, c, GET_ENDING_INDEX(child));
 	return next_node_child++;
 }
 
@@ -220,13 +258,12 @@ void add_word(const char* substr) {
 	unsigned int node_index = 1;
 	assert(substr);
 
-	while (*substr != '\0') {
+	while (*(substr+1) != '\0') {
 		node_index = get_create_child(node_index, *substr);
 		++substr;
-		debug_only(total_len_add++);
 	}
 
-	set_ending(node_index, 1);
+	set_ending_at(node_index, *substr, 1);
 }
 
 
@@ -237,60 +274,57 @@ void remove_word(const char* substr) {
 	unsigned int node_index = 1;
 	assert(substr);
 
-	while (*substr != '\0') {
+	while (*(substr+1) != '\0') {
 		node_index = get_child(node_index, *substr);
-		if (node_index == 0) {
+		if (INDEX_VALUE(node_index) == 0) {
 			return;
 		}
 		++substr;
-		debug_only(total_len_delete++);
 	}
 
-	set_ending(node_index, 0);
+	set_ending_at(node_index, *substr, 0);
 }
 
+unsigned char res_char[MAX_NODES];
 
 void search_from(const char* search, const size_t start) {
 
 	unsigned int node_index = 1;
-
+	unsigned int value = 1;
 	assert(search);
 	debug_only(total_search++);
-
+	unsigned int oldvalue;
+	unsigned int created = 0;
 	const char *str_start = search;
 
-	while (*search != '\0' && node_index != 0) {
-
-		if (get_ending(node_index) == 1 && (*search == ' ' || *search == '\0')) {
-
+	while (*(search) != '\0' && value != 0) {
+		oldvalue = value;
+		node_index = get_child(node_index, *search);
+		value = INDEX_VALUE(node_index);
+		//debug_print("R: %d->%d, '%c' - '%c' ENDING: %d\n", node_index, value, *search, *(search+1), get_ending(node_index));
+		if (get_ending(node_index) == 1 && (*(search+1) == ' ' || *(search+1) == '\0')) {
+			
 			#pragma omp critical
-			if (start < search_state[node_index].start) {
+			{
+				node_index = get_child(node_index, *search);
+				value = INDEX_VALUE(node_index);
+				created = INDEX_VALUE(get_create_child(oldvalue, *search));
+				if (start < search_state[created].start) {
 
-				if (search_state[node_index].start == MAX_VAL) {
-					results_list[results_found++] = node_index;
+					if (search_state[created].start == MAX_VAL) {
+						results_list[results_found++] = created;
+					}
+
+					search_state[created].start = start;
+					search_state[created].end = search + 1 - str_start;
+					// list will be used to find the results and zero the search_state table
 				}
-
-				search_state[node_index].start = start;
-				search_state[node_index].end = search - str_start;
-				// list will be used to find the results and zero the search_state table
 			}
 		}
 
-		node_index = get_child(node_index, *search);
 		++search;
 	}
 
-	if (node_index != 0 && *search == '\0' && get_ending(node_index) == 1) {
-
-		#pragma omp critical
-		if (start < search_state[node_index].start) {
-			if (search_state[node_index].start == MAX_VAL) {
-				results_list[results_found++] = node_index;
-			}
-			search_state[node_index].start = start;
-			search_state[node_index].end = search - str_start;
-		}
-	}
 }
 
 
@@ -396,9 +430,8 @@ int main() {
 	debug_print("TOTAL: Words added: %zu\n", words_added); 
 	size_t i;
 
-	// Wait 2 seconds before printing R
 	//debug_print("Waiting 5 seconds\n");
-	sleep(5);
+	sleep(2);
 	debug_print("Finished sleeping.\n");
 
 
@@ -424,6 +457,9 @@ int main() {
 			fflush(stdout);
 			getchar();
 			continue;
+		}
+		if (action == 'Z') {
+			break;
 		}
 
 		// read junk space
