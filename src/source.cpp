@@ -10,29 +10,19 @@
 #endif
 
 // Debugging defines
-//#define NDEBUG
+#define NDEBUG
 #include <assert.h>
 
 // PARALLEL CONFIGURATION
-//#define PARALLEL_SORT
 #define NUM_THREADS 10
 #define PARALLEL_CHUNK_SIZE 512
 
 
-// ARRAY AND MEMORY CONFIGURATION
-//#define ARRAY_NODES 	1500000 // The bigger the better probably
-// Run atleast 1 time without NDEBUG if you make changes to this.
+#define MAX_NODES        900000000L
+#define MAX_USED_CHAR    255
+#define MAX_ARRAY_NODES  8000000
 
-//#define ARRAY_MAX_DEPTH	15 // Depth bigger than this only gets maps
-// Use small value if ARRAY_NODES is small
-
-
-
-#define MAX_NODES		900000000L
-#define MAX_USED_CHAR   	255
-#define MAX_ARRAY_NODES 	8000000
-
-#define MAX_RESULTS 	10000000
+#define MAX_RESULTS      10000000
 
 #define MAX_MAP_NODES (MAX_NODES - MAX_ARRAY_NODES)
 
@@ -46,15 +36,6 @@
 #else
 #define debug_print(...)  do{ }while(0)
 #define debug_only(...) do{ }while(0)
-	#ifdef _MSC_VER /* VS PORTABILITY. */
-	/*#define getline vs_getline
-
-	int vs_getline(char** line, size_t* len, FILE* f) {
-		fgets(*line, *len, f);
-		return strlen(*line);
-	}
-*/
-	#endif // _MSC_VER
 #endif // NDEBUG
 
 
@@ -95,10 +76,11 @@ int total_search = 0;
 int total_results = 0;
 #endif
 
-void print_report() { 
+
+void print_report() {
 	debug_print("NODE COUNT: %d -- MAPS USED: %d\n", next_node_child, next_node_child - MAX_ARRAY_NODES);
 	debug_print("Total adds: %d : %d\nTotal deletes: %d: %d\nTotal queries: %d : %d\nTotal searches run: %d & Total Results: %d\n",
-			total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results); 
+		total_add, total_len_add, total_delete, total_len_delete, total_query, total_len_query, total_search, total_results);
 
 }
 
@@ -114,28 +96,23 @@ inline void init_node_ar(NODE_AR* node) {
 	node->word_ending = 0;
 }
 
+
 inline void init_node_map(NODE_MAP* node) {
 	node->word_ending = 0;
 	node->map_children = std::map<unsigned char, unsigned int>();
 }
 
 
+// Allocate all of the memory since this does not count as execution time (as per the contest's rules)
+// This saves allocation time when it matters.
 void init_arrays() {
-//	debug_print("Sizeof NODE_AR: %zu - Sizeof NODE_MAP: %zu\n", sizeof(NODE_AR), sizeof(NODE_MAP));
-
+	//	debug_print("Sizeof NODE_AR: %zu - Sizeof NODE_MAP: %zu\n", sizeof(NODE_AR), sizeof(NODE_MAP));
 	unsigned int i;
 
-	
-	#ifndef NDEBUG
-	for (i = 0; i < 4; ++i) {
-		debug_print("Allocating %zuMB in %d\n", (MAX_RESULTS*sizeof(unsigned int) + MAX_NODES*sizeof(N_GRAM) + (size_t)MAX_ARRAY_NODES * sizeof(NODE_AR) + (size_t)MAX_NODES * sizeof(N_GRAM) + (size_t)MAX_MAP_NODES* sizeof(NODE_MAP))/ 1000000, 4-i);
-		sleep(1);
-	}
-	#endif
-	search_state = (N_GRAM*) malloc(MAX_NODES*sizeof(N_GRAM));
-	results_list = (unsigned int*) malloc(MAX_RESULTS*sizeof(unsigned int));
+	search_state = (N_GRAM*)malloc(MAX_NODES * sizeof(N_GRAM));
+	results_list = (unsigned int*)malloc(MAX_RESULTS * sizeof(unsigned int));
 
-	nodes_ar = (NODE_AR*) malloc(MAX_ARRAY_NODES*sizeof(NODE_AR));
+	nodes_ar = (NODE_AR*)malloc(MAX_ARRAY_NODES * sizeof(NODE_AR));
 	assert(nodes_ar);
 
 	for (i = 0; i < MAX_ARRAY_NODES; ++i) {
@@ -143,13 +120,12 @@ void init_arrays() {
 	}
 
 	// init NODE_MAP
-  	nodes_map = (NODE_MAP*) malloc(MAX_MAP_NODES * sizeof(NODE_MAP));
-  	for (i = 0; i < MAX_MAP_NODES; ++i) {
-  		init_node_map(&nodes_map[i]);
-  	}
-
-
+	nodes_map = (NODE_MAP*)malloc(MAX_MAP_NODES * sizeof(NODE_MAP));
+	for (i = 0; i < MAX_MAP_NODES; ++i) {
+		init_node_map(&nodes_map[i]);
+	}
 }
+
 
 char get_ending(unsigned int index) {
 	if (index < MAX_ARRAY_NODES) {
@@ -159,6 +135,7 @@ char get_ending(unsigned int index) {
 	index -= MAX_ARRAY_NODES;
 	return nodes_map[index].word_ending;
 }
+
 
 void set_ending(unsigned int index, char is_ending) {
 	if (index < MAX_ARRAY_NODES) {
@@ -171,6 +148,9 @@ void set_ending(unsigned int index, char is_ending) {
 	nodes_map[index].word_ending = is_ending;
 }
 
+
+// Gets the child node of the Trie
+// It works with both the array part and the map part of the Trie.
 unsigned int get_child(unsigned int index, unsigned char c) {
 	if (index < MAX_ARRAY_NODES) {
 		return nodes_ar[index].ar_children[c];
@@ -184,33 +164,34 @@ unsigned int get_child(unsigned int index, unsigned char c) {
 	return 0;
 }
 
-// TODO: rewrite
+
+// Used in add operation, if it does not find the child node it returns an empty (preallocated) node
+// It works with both the array part and the map part of the Trie.
 unsigned int get_create_child(unsigned int index, unsigned char c) {
 	unsigned int child = get_child(index, c);
-	if ( child!= 0) {
+	if (child != 0) {
 		return child;
 	}
 
 	// Create child
-
 	if (index < MAX_ARRAY_NODES) {
 		// Parent is array
 		nodes_ar[index].ar_children[c] = next_node_child;
 		return next_node_child++;
 	}
-	
+
 	//Parent is map
 	index -= MAX_ARRAY_NODES;
 	#ifndef NDEBUG
-	if (index >= MAX_MAP_NODES) { 
-		debug_print("Error. Max nodes are not enough!\n"); 
+	if (index >= MAX_MAP_NODES) {
+		debug_print("Error. Max nodes are not enough!\n");
 		print_report();
 		printf("\n"); // to stop harness
 		fflush(stdout);
 		exit(0);
 	}
 	#endif
-	nodes_map[index].map_children.insert(std::pair<unsigned char,unsigned int>(c, next_node_child));
+	nodes_map[index].map_children.insert(std::pair<unsigned char, unsigned int>(c, next_node_child));
 	return next_node_child++;
 }
 
@@ -230,7 +211,7 @@ void add_word(const char* substr) {
 }
 
 
-// NOTE: Nodes stay inside for now. Depending on the tests this could be faster / slower
+// NOTE: Nodes stay in the tree for now. Depending on the tests this could be faster / slower
 // Current implementation is faster the less searches there are.
 void remove_word(const char* substr) {
 
@@ -250,6 +231,8 @@ void remove_word(const char* substr) {
 }
 
 
+// Performs the Trie search from the search query (+ an offset)
+// This runs in parallel and stores the results in the result arrays
 void search_from(const char* search, const size_t start) {
 
 	unsigned int node_index = 1;
@@ -294,6 +277,7 @@ void search_from(const char* search, const size_t start) {
 }
 
 
+// Used for sorting the results
 inline int comparator(const N_GRAM* left, const N_GRAM* right) {
 	if (left->start != right->start) {
 		return (left->start > right->start) ? 1 : -1;
@@ -302,6 +286,7 @@ inline int comparator(const N_GRAM* left, const N_GRAM* right) {
 }
 
 
+// Resolves a Q: query and stores the results sorted.
 int search_implementation(const char* search, const size_t search_len) {
 
 	// This should only be run by master thread
@@ -310,14 +295,16 @@ int search_implementation(const char* search, const size_t search_len) {
 	// set to zero for the new search
 	results_found = 0;
 
+	// This is because search[-1] is technically a ' '
 	search_from(search, 0);
-	debug_only(total_len_query+=search_len);
+	debug_only(total_len_query += search_len);
 
 	#pragma omp parallel num_threads(NUM_THREADS)
 	{
 		// NOTE: n_start > search, no need for pntr_diff types
 		#pragma omp for schedule(dynamic, PARALLEL_CHUNK_SIZE)
 		for (i = 1; i < search_len; ++i) {
+			// Whenever we find a space we start a new Trie search
 			if (search[i] == ' ') {
 				search_from(search + i + 1, i + 1);
 			}
@@ -326,7 +313,6 @@ int search_implementation(const char* search, const size_t search_len) {
 
 	if (results_found == 0) {
 		printf("-1\n");
-		//	debug_print("\n");
 		return 0;
 	}
 
@@ -337,46 +323,44 @@ int search_implementation(const char* search, const size_t search_len) {
 	for (i = 1; i < results_found; ++i) {
 		j = i - 1;
 		temp = results_list[i];
-		while (j>=0 && comparator(&search_state[temp], &search_state[results_list[j]])<0) {
-
-			results_list[j+1] = results_list[j];
+		while (j >= 0 && comparator(&search_state[temp], &search_state[results_list[j]])<0) {
+			results_list[j + 1] = results_list[j];
 			--j;
 		}
-		results_list[j+1] = temp;
+		results_list[j + 1] = temp;
 	}
 
 
 	N_GRAM *found;
+	for (i = 0; i < results_found - 1; ++i) {
 
-    for (i = 0; i < results_found - 1; ++i) {
+		found = &search_state[results_list[i]];
+		fwrite(&search[found->start], 1, found->end, stdout);
 
-        found = &search_state[results_list[i]];
-        fwrite(&search[found->start], 1, found->end, stdout);
+		// zero it for the next search
+		found->start = MAX_VAL;
 
-        // zero it for the next search
-        found->start = MAX_VAL;
+		printf("|");
+	}
 
-        printf("|");
-    }
 
-    found = &search_state[results_list[i]];
-    fwrite(&search[found->start], 1, found->end, stdout);
+	found = &search_state[results_list[i]];
+	fwrite(&search[found->start], 1, found->end, stdout);
 
-    // zero it for the next search
-    found->start = MAX_VAL;
+	// zero it for the next search
+	found->start = MAX_VAL;
 
-    printf("\n");
-	debug_only(total_results+=results_found);
+	printf("\n");
+	debug_only(total_results += results_found);
 	return 0;
 }
-
 
 
 int main() {
 
 	init_arrays();
 
-	//maybe larger for fiewer reallocations
+	//maybe larger for fewer reallocations
 	size_t len = 1000000;
 	char *line = (char*)malloc(len * sizeof(char));
 	assert(line);
@@ -393,12 +377,11 @@ int main() {
 		add_word(line);
 		++words_added;
 	}
-	debug_print("TOTAL: Words added: %zu\n", words_added); 
+	debug_print("TOTAL: Words added: %zu\n", words_added);
 	size_t i;
 
-	// Wait 2 seconds before printing R
-	//debug_print("Waiting 5 seconds\n");
-	sleep(5);
+	// Wait 3 seconds before printing R (R starts the timer)
+	sleep(3);
 	debug_print("Finished sleeping.\n");
 
 
@@ -410,7 +393,7 @@ int main() {
 	int action_count = 0;
 	int queries_count = 0;
 
-	// totaly ready to start
+	// totally ready to start
 	printf("R\n");
 	// TODO: find faster way to force fflush
 	fflush(stdout);
@@ -429,12 +412,10 @@ int main() {
 		// read junk space
 		getchar();
 
-		// TDDO: implement fast input
+		// TODO: implement fast input (nonblocking)
 		// Read the rest of input
 		input_len = getline(&line, &len, stdin);
 		line[input_len - 1] = '\0';
-		//action = line[0];
-		//if (action_count % 10 == 0) debug_print("Actions: %d\n", action_count);
 		action_count++;
 
 		switch (action) {
@@ -459,5 +440,4 @@ int main() {
 	free(line);
 	return 0;
 }
-
 
